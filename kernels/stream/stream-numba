@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# stream-numba — wrapper that invokes kernel_stream_numba.py via Python.
+#
+# This script is the "binary" that run_stream.sh and the correctness test
+# expect at build/stream/numba_<platform>/stream-numba.  The CMake custom
+# target (STREAM_ENABLE_NUMBA) copies this wrapper into the build directory.
+#
+# Environment variables:
+#   PYTHON_BIN       Path to python executable (default: python3 on PATH)
+#   STREAM_USE_FLOAT Set to 1 for single precision (default: double)
+#   NUMBA_CACHE_DIR  Override Numba's PTX cache directory (default: __pycache__)
+
+set -euo pipefail
+
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY_SCRIPT="${SCRIPT_DIR}/kernel_stream_numba.py"
+
+exec "${PYTHON_BIN}" "${PY_SCRIPT}" "$@"

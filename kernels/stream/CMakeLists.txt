@@ -103,6 +103,7 @@ message(STATUS "  ./stream-raja   --arraysize 268435456 --numtimes 30 --warmup 1
 message(STATUS "  ./stream-sycl   --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "  ./stream-hip    --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "  ./stream-julia  --arraysize 268435456 --numtimes 30 --warmup 10")
+message(STATUS "  ./stream-numba  --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "")
 
 # ── Kokkos abstraction (abstraction=kokkos) ───────────────────────────────────
@@ -333,7 +334,40 @@ else()
     message(STATUS "  Enable with -DSTREAM_ENABLE_JULIA=ON (requires Julia ≥ 1.9)")
 endif()
 
-# ── Placeholder targets for future implementations ────────────────────────────
-# Each target follows the naming convention: stream-<abstraction>
+# ── Numba abstraction (abstraction=numba) ────────────────────────────────────
+# Python does not compile to a native binary.  The "target" is a shell wrapper
+# (stream-numba) that invokes python3 kernel_stream_numba.py.
+#
+# Requires:
+#   - Python ≥ 3.9 with numba ≥ 0.57 and numpy on PATH
+#       pip install numba numpy
+#   - CUDA toolkit accessible to Numba (set CUDA_HOME if not auto-detected)
+#
+# Enable with:
+#   cmake -S kernels/stream -B build/stream/numba_nvidia_a100 \
+#         -DSTREAM_ENABLE_NUMBA=ON
 
-# stream-numba     → run via Python script         (Numba CUDA)
+option(STREAM_ENABLE_NUMBA "Install stream-numba wrapper (requires Python + Numba)" OFF)
+
+if(STREAM_ENABLE_NUMBA)
+    message(STATUS "Numba enabled — installing stream-numba wrapper")
+
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/stream-numba
+        ${CMAKE_CURRENT_BINARY_DIR}/stream-numba
+        COPYONLY
+    )
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/kernel_stream_numba.py
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel_stream_numba.py
+        COPYONLY
+    )
+
+    install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/stream-numba DESTINATION bin)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/kernel_stream_numba.py DESTINATION bin)
+
+    message(STATUS "  Numba: install deps with 'pip install numba numpy'")
+else()
+    message(STATUS "Numba disabled — stream-numba target skipped")
+    message(STATUS "  Enable with -DSTREAM_ENABLE_NUMBA=ON (requires Python ≥ 3.9 + numba)")
+endif()
