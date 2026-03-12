@@ -79,9 +79,16 @@ message(STATUS "        -DKokkos_ROOT=<prefix> \\")
 message(STATUS "        -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON")
 message(STATUS "  cmake --build build/stream/kokkos_nvidia_a100 --parallel")
 message(STATUS "")
+message(STATUS "RAJA/CUDA build:")
+message(STATUS "  cmake -S kernels/stream -B build/stream/raja_nvidia_a100 \\")
+message(STATUS "        -DRAJA_DIR=<prefix>/lib/cmake/raja \\")
+message(STATUS "        -DRAJA_ENABLE_CUDA=ON -DRAJA_CUDA_ARCH=sm_80")
+message(STATUS "  cmake --build build/stream/raja_nvidia_a100 --parallel")
+message(STATUS "")
 message(STATUS "Run with:")
 message(STATUS "  ./stream-cuda   --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "  ./stream-kokkos --arraysize 268435456 --numtimes 30 --warmup 10")
+message(STATUS "  ./stream-raja   --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "")
 
 # ── Kokkos abstraction (abstraction=kokkos) ───────────────────────────────────
@@ -115,11 +122,43 @@ else()
     message(STATUS "  Install Kokkos and re-run with -DKokkos_ROOT=<prefix>")
 endif()
 
+# ── RAJA abstraction (abstraction=raja) ──────────────────────────────────────
+# Requires RAJA ≥ 2022.10 installed with cmake --install.
+# Configure with:
+#   cmake -S kernels/stream -B build/stream/raja_nvidia_a100   \
+#         -DRAJA_DIR=/path/to/raja/install/lib/cmake/raja      \
+#         -DRAJA_ENABLE_CUDA=ON -DRAJA_CUDA_ARCH=sm_80
+#
+# RAJA propagates RAJA_ENABLE_CUDA (and the --expt-extended-lambda flag)
+# through its interface target, so no extra flags are needed here.
+#
+# For OpenMP (CPU):
+#   cmake ... -DRAJA_ENABLE_OPENMP=ON
+#
+# For HIP (AMD):
+#   cmake ... -DRAJA_ENABLE_HIP=ON -DRAJA_HIP_ARCH=gfx90a
+find_package(RAJA QUIET)
+if(RAJA_FOUND)
+    message(STATUS "RAJA ${RAJA_VERSION} found — building stream-raja")
+    add_executable(stream-raja kernel_stream_raja.cpp)
+    target_link_libraries(stream-raja PRIVATE RAJA)
+    target_include_directories(stream-raja PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(stream-raja PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>: -O3 -Wall -Wextra>
+    )
+    if(STREAM_USE_FLOAT)
+        target_compile_definitions(stream-raja PRIVATE STREAM_USE_FLOAT)
+    endif()
+    install(TARGETS stream-raja DESTINATION bin)
+else()
+    message(STATUS "RAJA not found — stream-raja target skipped")
+    message(STATUS "  Install RAJA and re-run with -DRAJA_DIR=<prefix>/lib/cmake/raja")
+endif()
+
 # ── Placeholder targets for future implementations ────────────────────────────
 # Each target follows the naming convention: stream-<abstraction>
 
 # stream-hip       → kernel_stream_hip.cpp        (AMD HIP backend)
-# stream-raja      → kernel_stream_raja.cpp        (RAJA backend)
 # stream-sycl      → kernel_stream_sycl.cpp        (SYCL / DPC++ backend)
 # stream-julia     → run via Julia script          (CUDA.jl / AMDGPU.jl)
 # stream-numba     → run via Python script         (Numba CUDA)
