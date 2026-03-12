@@ -10,7 +10,7 @@ parameters and `project_spec.md §8.2` for the full specification.
 |---|---|
 | `stream_common.h` | Shared types, constants, stats, output format — included by ALL implementations |
 | `kernel_stream_cuda.cu` | CUDA native baseline (`abstraction=native` on NVIDIA) |
-| `kernel_stream_hip.cpp` | HIP native baseline — TODO |
+| `kernel_stream_hip.cpp` | HIP native baseline (AMD MI250X/MI300X, `abstraction=native` on AMD) |
 | `kernel_stream_kokkos.cpp` | Kokkos portable abstraction (CUDA/HIP/OpenMP backends) |
 | `kernel_stream_raja.cpp` | RAJA portable abstraction (CUDA/HIP/OpenMP backends) |
 | `kernel_stream_sycl.cpp` | SYCL 2020 (Intel DPC++ / AdaptiveCpp, GPU and CPU backends) |

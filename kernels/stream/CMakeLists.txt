@@ -85,6 +85,12 @@ message(STATUS "        -DRAJA_DIR=<prefix>/lib/cmake/raja \\")
 message(STATUS "        -DRAJA_ENABLE_CUDA=ON -DRAJA_CUDA_ARCH=sm_80")
 message(STATUS "  cmake --build build/stream/raja_nvidia_a100 --parallel")
 message(STATUS "")
+message(STATUS "HIP build (AMD MI250X, opt-in):")
+message(STATUS "  cmake -S kernels/stream -B build/stream/hip_amd_mi250x \\")
+message(STATUS "        -DCMAKE_CXX_COMPILER=hipcc \\")
+message(STATUS "        -DSTREAM_ENABLE_HIP=ON -DHIP_ARCH=gfx90a")
+message(STATUS "  cmake --build build/stream/hip_amd_mi250x --parallel")
+message(STATUS "")
 message(STATUS "SYCL build (Intel PVC, opt-in):")
 message(STATUS "  cmake -S kernels/stream -B build/stream/sycl_intel_pvc \\")
 message(STATUS "        -DCMAKE_CXX_COMPILER=icpx -DSTREAM_ENABLE_SYCL=ON")
@@ -95,6 +101,7 @@ message(STATUS "  ./stream-cuda   --arraysize 268435456 --numtimes 30 --warmup 1
 message(STATUS "  ./stream-kokkos --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "  ./stream-raja   --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "  ./stream-sycl   --arraysize 268435456 --numtimes 30 --warmup 10")
+message(STATUS "  ./stream-hip    --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "")
 
 # ── Kokkos abstraction (abstraction=kokkos) ───────────────────────────────────
@@ -221,9 +228,61 @@ else()
     message(STATUS "  Enable with -DSTREAM_ENABLE_SYCL=ON and set CXX compiler to icpx/acpp")
 endif()
 
+# ── HIP native baseline (abstraction=native on AMD) ──────────────────────────
+# Requires ROCm ≥ 5.0 and hipcc on PATH.  The CUDA and HIP targets share
+# the same CMakeLists.txt; HIP is opt-in to avoid breaking CUDA-only builds.
+#
+# Configure with:
+#   cmake -S kernels/stream -B build/stream/hip_amd_mi250x \
+#         -DCMAKE_CXX_COMPILER=hipcc \
+#         -DSTREAM_ENABLE_HIP=ON \
+#         -DHIP_ARCH=gfx90a
+#
+# For MI100 (gfx908):
+#   cmake ... -DHIP_ARCH=gfx908
+#
+# For MI300X (gfx942):
+#   cmake ... -DHIP_ARCH=gfx942
+
+option(STREAM_ENABLE_HIP "Build stream-hip (requires hipcc)" OFF)
+set(HIP_ARCH "gfx90a" CACHE STRING "AMD GPU architecture target (default: MI250X)")
+
+if(STREAM_ENABLE_HIP)
+    message(STATUS "HIP enabled — building stream-hip (arch=${HIP_ARCH})")
+
+    # Enable HIP language support; CMake ≥ 3.21 supports LANGUAGES HIP natively.
+    # For older CMake, we rely on hipcc being the CXX compiler directly.
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+        enable_language(HIP)
+        set_source_files_properties(kernel_stream_hip.cpp PROPERTIES LANGUAGE HIP)
+    endif()
+
+    add_executable(stream-hip kernel_stream_hip.cpp)
+    target_include_directories(stream-hip PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    # --offload-arch: tells hipcc which AMD GPU ISA to generate
+    target_compile_options(stream-hip PRIVATE
+        -O3
+        --offload-arch=${HIP_ARCH}
+        -Wall
+        -Wextra
+    )
+    target_link_options(stream-hip PRIVATE
+        --offload-arch=${HIP_ARCH}
+    )
+
+    if(STREAM_USE_FLOAT)
+        target_compile_definitions(stream-hip PRIVATE STREAM_USE_FLOAT)
+    endif()
+
+    install(TARGETS stream-hip DESTINATION bin)
+else()
+    message(STATUS "HIP disabled — stream-hip target skipped")
+    message(STATUS "  Enable with -DSTREAM_ENABLE_HIP=ON -DCMAKE_CXX_COMPILER=hipcc")
+endif()
+
 # ── Placeholder targets for future implementations ────────────────────────────
 # Each target follows the naming convention: stream-<abstraction>
 
-# stream-hip       → kernel_stream_hip.cpp        (AMD HIP backend)
 # stream-julia     → run via Julia script          (CUDA.jl / AMDGPU.jl)
 # stream-numba     → run via Python script         (Numba CUDA)
