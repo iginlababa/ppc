@@ -85,10 +85,16 @@ message(STATUS "        -DRAJA_DIR=<prefix>/lib/cmake/raja \\")
 message(STATUS "        -DRAJA_ENABLE_CUDA=ON -DRAJA_CUDA_ARCH=sm_80")
 message(STATUS "  cmake --build build/stream/raja_nvidia_a100 --parallel")
 message(STATUS "")
+message(STATUS "SYCL build (Intel PVC, opt-in):")
+message(STATUS "  cmake -S kernels/stream -B build/stream/sycl_intel_pvc \\")
+message(STATUS "        -DCMAKE_CXX_COMPILER=icpx -DSTREAM_ENABLE_SYCL=ON")
+message(STATUS "  cmake --build build/stream/sycl_intel_pvc --parallel")
+message(STATUS "")
 message(STATUS "Run with:")
 message(STATUS "  ./stream-cuda   --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "  ./stream-kokkos --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "  ./stream-raja   --arraysize 268435456 --numtimes 30 --warmup 10")
+message(STATUS "  ./stream-sycl   --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "")
 
 # ── Kokkos abstraction (abstraction=kokkos) ───────────────────────────────────
@@ -155,10 +161,69 @@ else()
     message(STATUS "  Install RAJA and re-run with -DRAJA_DIR=<prefix>/lib/cmake/raja")
 endif()
 
+# ── SYCL abstraction (abstraction=sycl) ──────────────────────────────────────
+# Requires a SYCL 2020-conformant toolchain:
+#   Intel DPC++ (oneAPI ≥ 2022.3):
+#     source /opt/intel/oneapi/setvars.sh
+#     cmake -S kernels/stream -B build/stream/sycl_intel_pvc \
+#           -DCMAKE_CXX_COMPILER=icpx \
+#           -DSYCL_TARGET_BACKEND=opencl
+#
+#   Intel DPC++ targeting NVIDIA A100 (CUDA plugin):
+#     cmake -S kernels/stream -B build/stream/sycl_nvidia_a100 \
+#           -DCMAKE_CXX_COMPILER=clang++ \
+#           -DSYCL_TARGETS="nvptx64-nvidia-cuda" \
+#           -DSYCL_CUDA_ARCH=sm_80
+#
+#   AdaptiveCpp / hipSYCL targeting AMD:
+#     cmake -S kernels/stream -B build/stream/sycl_amd_mi250x \
+#           -DCMAKE_CXX_COMPILER=acpp \
+#           -DHIPSYCL_TARGETS="hip:gfx90a"
+#
+# SYCL does not have a standard CMake find_package target; detection is done
+# by checking for the compiler flag or the presence of the sycl header.
+# We expose two CMake options to opt in:
+#   -DSTREAM_ENABLE_SYCL=ON         (required; off by default)
+#   -DSTREAM_SYCL_COMPAT=ON         (use <CL/sycl.hpp> for older DPC++)
+#   -DSYCL_FLAGS="-fsycl;-fsycl-targets=nvptx64-nvidia-cuda"  (extra flags)
+
+option(STREAM_ENABLE_SYCL "Build stream-sycl (requires SYCL compiler)" OFF)
+set(SYCL_FLAGS "" CACHE STRING "Extra SYCL compiler/linker flags (semicolon-separated)")
+
+if(STREAM_ENABLE_SYCL)
+    message(STATUS "SYCL enabled — building stream-sycl")
+    add_executable(stream-sycl kernel_stream_sycl.cpp)
+    target_include_directories(stream-sycl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    # Base SYCL flag — works for DPC++ (icpx/clang++) and AdaptiveCpp (acpp)
+    target_compile_options(stream-sycl PRIVATE -O3 -Wall -Wextra -fsycl)
+    target_link_options(stream-sycl PRIVATE -fsycl)
+
+    # Extra backend-targeting flags (e.g. -fsycl-targets=nvptx64-nvidia-cuda)
+    if(SYCL_FLAGS)
+        separate_arguments(sycl_flag_list UNIX_COMMAND "${SYCL_FLAGS}")
+        target_compile_options(stream-sycl PRIVATE ${sycl_flag_list})
+        target_link_options(stream-sycl PRIVATE ${sycl_flag_list})
+    endif()
+
+    if(STREAM_SYCL_COMPAT)
+        target_compile_definitions(stream-sycl PRIVATE STREAM_SYCL_COMPAT)
+        message(STATUS "  SYCL: using legacy <CL/sycl.hpp> header")
+    endif()
+
+    if(STREAM_USE_FLOAT)
+        target_compile_definitions(stream-sycl PRIVATE STREAM_USE_FLOAT)
+    endif()
+
+    install(TARGETS stream-sycl DESTINATION bin)
+else()
+    message(STATUS "SYCL disabled — stream-sycl target skipped")
+    message(STATUS "  Enable with -DSTREAM_ENABLE_SYCL=ON and set CXX compiler to icpx/acpp")
+endif()
+
 # ── Placeholder targets for future implementations ────────────────────────────
 # Each target follows the naming convention: stream-<abstraction>
 
 # stream-hip       → kernel_stream_hip.cpp        (AMD HIP backend)
-# stream-sycl      → kernel_stream_sycl.cpp        (SYCL / DPC++ backend)
 # stream-julia     → run via Julia script          (CUDA.jl / AMDGPU.jl)
 # stream-numba     → run via Python script         (Numba CUDA)

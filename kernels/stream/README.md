@@ -13,7 +13,7 @@ parameters and `project_spec.md §8.2` for the full specification.
 | `kernel_stream_hip.cpp` | HIP native baseline — TODO |
 | `kernel_stream_kokkos.cpp` | Kokkos portable abstraction (CUDA/HIP/OpenMP backends) |
 | `kernel_stream_raja.cpp` | RAJA portable abstraction (CUDA/HIP/OpenMP backends) |
-| `kernel_stream_sycl.cpp` | SYCL / DPC++ — TODO |
+| `kernel_stream_sycl.cpp` | SYCL 2020 (Intel DPC++ / AdaptiveCpp, GPU and CPU backends) |
 | `kernel_stream_julia.jl` | Julia (CUDA.jl / AMDGPU.jl) — TODO |
 | `kernel_stream_numba.py` | Python / Numba CUDA — TODO |
 | `CMakeLists.txt` | CMake build for C++/CUDA/HIP/Kokkos/RAJA/SYCL targets |
