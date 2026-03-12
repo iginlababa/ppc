@@ -1,0 +1,9 @@
+# Raw benchmark output files are tracked via Git LFS (see root .gitattributes).
+# The directory structure (platform/kernel/) is tracked normally via .gitkeep files.
+# Individual .out files are LFS-tracked once generated.
+
+# Exclude re-generated profiler reports if they become very large
+# (keep the CSVs, ignore binary report files)
+*.nsys-rep
+*.ncu-rep
+omniperf_*/

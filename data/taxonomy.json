@@ -1,0 +1,71 @@
+{
+  "_schema_version": "1.0",
+  "_description": "Structured database of abstraction failure and success patterns. Add entries as experiments are completed. See project_spec.md §10.4 for schema and §12 for taxonomy framework.",
+  "patterns": [
+    {
+      "id": "P001",
+      "type": "failure",
+      "name": "Launch Overhead Dominance",
+      "status": "hypothesis",
+      "symptom": "Abstraction 30-60% slower than native for kernels with execution time < 50 µs",
+      "root_cause_category": "Runtime Coordination Overhead",
+      "root_cause_detail": "Extra function call layers not fully inlined; runtime dispatch overhead accumulates when kernel execution time is short",
+      "affected_workloads": ["fine-grained kernels", "irregular applications with many small launches"],
+      "affected_platforms": ["all"],
+      "mitigation": [
+        "Use native for inner-loop hotspots",
+        "Coarsen task granularity to amortize launch cost",
+        "Enable aggressive inlining flags (-O3 --inline-aggressive)"
+      ],
+      "evidence": [],
+      "ppc_impact": "0.40-0.70 depending on kernel duration",
+      "related_experiments": ["E4", "E6"]
+    },
+    {
+      "id": "P002",
+      "type": "failure",
+      "name": "Compiler Backend Unrolling Failure",
+      "status": "hypothesis",
+      "symptom": "Abstraction 2-4x slower on NVIDIA for nested loops; matches on AMD",
+      "root_cause_category": "Compiler Backend Failure",
+      "root_cause_detail": "NVCC/PTX backend fails to unroll template-instantiated loops correctly; AMD LLVM backend handles the same patterns without regression",
+      "affected_workloads": ["multi-dimensional array access", "complex indexing", "DGEMM blocking"],
+      "affected_platforms": ["nvidia_a100"],
+      "mitigation": [
+        "Manual loop unrolling with #pragma unroll",
+        "Use vendor-tuned library (cuBLAS) for the failing kernel",
+        "File compiler bug report with minimal reproducer"
+      ],
+      "evidence": [],
+      "ppc_impact": "0.25-0.50 on affected platform",
+      "related_experiments": ["E2"],
+      "literature": "Godoy et al. 2023 — Julia DGEMM on A100"
+    },
+    {
+      "id": "P003",
+      "type": "failure",
+      "name": "Memory Layout Mismatch",
+      "status": "hypothesis",
+      "symptom": "20-40% bandwidth reduction vs. native; L2 hit rate drops from ~75% to ~45%",
+      "root_cause_category": "Memory Model Mismatch",
+      "root_cause_detail": "Abstraction defaults to non-optimal array layout (e.g., LayoutRight when LayoutLeft is required for NVIDIA coalescing); causes strided instead of unit-stride access",
+      "affected_workloads": ["multi-dimensional arrays with high data reuse", "stencil operations"],
+      "affected_platforms": ["nvidia_a100", "possibly amd_mi250x"],
+      "mitigation": [
+        "Explicitly specify Kokkos::LayoutLeft for NVIDIA kernels",
+        "Profile L2 hit rate before and after layout change",
+        "Document layout requirements per platform in config.yaml"
+      ],
+      "evidence": [],
+      "ppc_impact": "0.60-0.80 depending on reuse distance",
+      "related_experiments": ["E3"],
+      "literature": "Kokkos stencil documentation"
+    }
+  ],
+  "success_patterns": [],
+  "_notes": [
+    "All patterns marked 'hypothesis' must be validated with experiment evidence before paper submission.",
+    "Add 'evidence' array entries referencing experiment_id values from data/performance.csv.",
+    "Change status from 'hypothesis' to 'validated' once experiment_ids are added."
+  ]
+}

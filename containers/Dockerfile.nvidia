@@ -1,0 +1,59 @@
+# Reproducibility container for NVIDIA A100 experiments.
+# Based on official NVIDIA CUDA image.
+#
+# Build: docker build -f containers/Dockerfile.nvidia -t hpc-abstraction:nvidia .
+# Run:   docker run --gpus all -v $(pwd):/workspace hpc-abstraction:nvidia bash
+
+FROM nvcr.io/nvidia/cuda:12.3.0-devel-ubuntu22.04
+
+LABEL maintainer="TODO"
+LABEL description="HPC abstraction benchmarking environment — NVIDIA A100"
+
+# ── System dependencies ───────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    ninja-build \
+    git \
+    wget \
+    curl \
+    python3 \
+    python3-pip \
+    python3-dev \
+    gcc-12 \
+    g++-12 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
+
+# ── Conda / Mamba ─────────────────────────────────────────────────────────────
+RUN wget -qO /tmp/miniforge.sh \
+    https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/conda && rm /tmp/miniforge.sh
+ENV PATH="/opt/conda/bin:${PATH}"
+
+# ── Python environment ────────────────────────────────────────────────────────
+COPY environment.yml /workspace/environment.yml
+RUN conda env create -f /workspace/environment.yml && conda clean -afy
+
+# ── Kokkos (CUDA backend) ─────────────────────────────────────────────────────
+ARG KOKKOS_VERSION=4.2.00
+RUN git clone --depth=1 --branch ${KOKKOS_VERSION} \
+    https://github.com/kokkos/kokkos /opt/kokkos-src && \
+    cmake -S /opt/kokkos-src -B /opt/kokkos-build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/kokkos \
+        -DKokkos_ENABLE_CUDA=ON \
+        -DKokkos_ARCH_AMPERE80=ON \
+        -DKokkos_ENABLE_CUDA_LAMBDA=ON && \
+    cmake --build /opt/kokkos-build --parallel 8 && \
+    cmake --install /opt/kokkos-build && \
+    rm -rf /opt/kokkos-src /opt/kokkos-build
+ENV Kokkos_ROOT=/opt/kokkos
+
+WORKDIR /workspace
+COPY . /workspace
+
+SHELL ["conda", "run", "-n", "hpc-abstraction", "/bin/bash", "-c"]
+CMD ["bash"]

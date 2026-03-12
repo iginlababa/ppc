@@ -1,0 +1,31 @@
+% §1 Introduction
+% Status: Written (stub — fill in after results)
+
+\section{Introduction}
+\label{sec:introduction}
+
+Exascale HPC systems are heterogeneous. Three major GPU vendors --- NVIDIA, AMD, and Intel ---
+each expose different memory hierarchies, execution models, and compiler backends.
+To write portable code, developers use abstraction layers: Kokkos, RAJA, SYCL, and Julia.
+These layers promise portability. They do not always deliver performance.
+
+The current state of practice is guesswork. Developers choose abstractions based on team familiarity,
+project history, or vendor recommendation --- not evidence. When performance degrades, root cause
+analysis is ad hoc. There is no systematic, measurement-driven framework for making these decisions.
+
+This paper makes the following contributions:
+
+\begin{enumerate}
+    \item An \textbf{empirical taxonomy} --- the first systematic classification of abstraction
+          failure modes and success patterns across architectures and workloads (Section~\ref{sec:taxonomy}).
+    \item A \textbf{measurement methodology} --- a reproducible protocol for cross-layer
+          performance attribution (Section~\ref{sec:methodology}).
+    \item A \textbf{quantified decision framework} --- evidence-based thresholds and rules
+          for abstraction selection (Section~\ref{sec:framework}).
+    \item A \textbf{performance portability dataset} --- TODO configurations across 5 abstractions
+          $\times$ 3 architectures $\times$ 7 workloads.
+    \item A \textbf{decision support tool} (\texttt{abstraction-advisor}) --- a command-line
+          advisor that ingests workload profiles and recommends abstraction strategies.
+\end{enumerate}
+
+% TODO: Add paper organization paragraph after structure is finalized.

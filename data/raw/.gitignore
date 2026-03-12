@@ -1,0 +1,8 @@
+# Large raw CSVs are tracked via Git LFS (see root .gitattributes).
+# This file keeps the directory in git while raw data is LFS-managed.
+# Rules:
+#   - Never manually edit any file in data/raw/
+#   - Never delete entries (append-only)
+#   - Each file maps to one parse_results.py run
+
+# Ignore nothing — all CSV content in this dir flows through LFS

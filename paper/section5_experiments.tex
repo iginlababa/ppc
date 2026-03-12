@@ -1,0 +1,57 @@
+% §5 Experimental Results
+% Status: Pending data
+
+\section{Experimental Results}
+\label{sec:experiments}
+
+% TODO: Fill in after all 9,450 timed runs are complete.
+% Template structure below.
+
+\subsection{E1 --- STREAM Triad}
+
+% Fig 3: Bandwidth vs. abstraction (3 platforms, IQR bars, peak reference)
+\begin{figure}[ht]
+    \centering
+    % \includegraphics[width=\linewidth]{figures/fig03_stream_throughput.pdf}
+    \caption{STREAM Triad effective memory bandwidth across abstractions and platforms
+             (Large size, $N = 2^{28}$). Dashed line: peak theoretical bandwidth.
+             Error bars: IQR over 30 runs.}
+    \label{fig:stream_throughput}
+\end{figure}
+
+% Fig 10: Efficiency relative to native
+\begin{figure}[ht]
+    \centering
+    % \includegraphics[width=\linewidth]{figures/fig10_stream_efficiency.pdf}
+    \caption{STREAM Triad efficiency relative to native baseline.
+             Dashed lines: PPC thresholds (0.80 excellent, 0.60 acceptable).}
+    \label{fig:stream_efficiency}
+\end{figure}
+
+\subsection{E2 --- Dense Matrix Multiplication (DGEMM)}
+% TODO
+
+\subsection{E3 --- 3D Stencil}
+% TODO
+
+\subsection{E4 --- Sparse Matrix-Vector Multiplication (SpMV)}
+% TODO
+
+\subsection{E5 --- Sparse Triangular Solve (SpTRSV)}
+% TODO
+
+\subsection{E6 --- Breadth-First Search (BFS)}
+% TODO
+
+\subsection{E7 --- N-Body Force Calculation}
+% TODO
+
+\subsection{PPC Summary}
+
+% Fig 17: PPC summary heatmap
+\begin{figure}[ht]
+    \centering
+    % \includegraphics[width=\linewidth]{figures/fig17_ppc_summary.pdf}
+    \caption{Performance Portability Coefficient (PPC) for all abstraction-kernel combinations.}
+    \label{fig:ppc_summary}
+\end{figure}

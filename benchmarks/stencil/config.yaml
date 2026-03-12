@@ -1,0 +1,60 @@
+experiment_id: E3
+kernel: stencil
+description: "3D structured-grid stencil — 7-point or 27-point Laplacian"
+group: regular
+source: "Mantevo MiniGhost, RAJAPerf"
+primary_metric: [throughput_gflops, bandwidth_gbs]
+stencil_type: 7point   # options: 7point | 27point
+
+problem_sizes:
+  small:
+    nx: 64
+    ny: 64
+    nz: 64
+    description: "Cache-resident problem"
+  medium:
+    nx: 256
+    ny: 256
+    nz: 256
+    description: "Realistic CFD/seismic grid"
+  large:
+    nx: 512
+    ny: 512
+    nz: 512
+    description: "Memory-bound; forces DRAM traffic"
+
+timing:
+  warmup_iterations: 10
+  timed_iterations: 30
+  statistics: [median, iqr, min, max]
+  outlier_threshold_sigma: 2.0
+
+thread_config:
+  # Override per platform in scripts/env/setup_*.sh
+  block_x: 16
+  block_y: 16
+  block_z: 1
+
+abstractions:
+  - native
+  - kokkos
+  - raja
+  - sycl
+  - julia
+
+platforms:
+  - nvidia_a100
+  - amd_mi250x
+  - intel_pvc
+
+notes:
+  - "Tests multi-dimensional indexing abstractions and memory layout defaults"
+  - "Known Kokkos layout mismatch pattern (Pattern 3 in taxonomy)"
+  - "NVIDIA prefers LayoutLeft — verify Kokkos default"
+
+correctness:
+  tolerance: 1.0e-6
+  reference: native
+
+deep_profiling_trigger:
+  overhead_threshold: 0.15

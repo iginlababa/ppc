@@ -1,0 +1,62 @@
+% §4 Methodology
+% Status: In progress
+
+\section{Methodology}
+\label{sec:methodology}
+
+\subsection{Experimental Design}
+
+We evaluate $5$ abstraction layers (native CUDA/HIP, Kokkos, RAJA, SYCL, Julia)
+across $3$ hardware platforms and $7$ representative kernels, yielding
+$315$ distinct configurations (5 abstractions $\times$ 3 platforms $\times$ 3 sizes $\times$ 7 kernels).
+Each configuration is executed $30$ times, producing $9{,}450$ individual timed kernel executions.
+
+\subsection{Measurement Protocol}
+
+Every experiment follows a strict protocol to ensure reproducibility:
+
+\begin{enumerate}
+    \item \textbf{Hardware lock} --- GPU and memory clocks locked to maximum stable
+          frequency; persistence mode enabled. Results from unlocked hardware are
+          not reported.
+    \item \textbf{Environment log} --- all software versions recorded before each session.
+    \item \textbf{Warm-up} --- 10 executions (never recorded) to amortize JIT compilation
+          (Julia), warm GPU caches, and exclude runtime initialization overhead.
+    \item \textbf{Timed runs} --- 30 kernel executions, each individually logged.
+    \item \textbf{Statistics} --- median $\pm$ IQR reported; outliers flagged at $>2\sigma$.
+\end{enumerate}
+
+\textbf{We never report only the mean.} GPU kernels exhibit outliers from OS jitter
+and DVFS that inflate mean values. The median is the primary reported statistic.
+
+\subsection{Performance Portability Coefficient}
+
+We use the PPC formulation of Pennycook et al.~\cite{Pennycook2019} (Equation~\ref{eq:ppc}).
+Efficiency is always relative to measured native performance, not theoretical peak.
+PPC $> 0.80$ denotes excellent portability; $0.60$--$0.80$ acceptable; $< 0.60$ poor.
+
+\subsection{Roofline Normalization}
+
+For every configuration, we compute hardware utilization
+$u = \text{BW}_\text{measured} / \text{BW}_\text{peak}$.
+Native implementations must achieve $u \geq 0.80$ on the Large problem size
+before abstraction experiments begin. This verifies that the environment is
+correctly configured and that we are measuring abstraction overhead, not
+hardware or software setup defects.
+
+\subsection{Deep Profiling}
+
+Any configuration where abstraction achieves $< 0.85 \times$ native performance
+is automatically flagged for deep profiling. For NVIDIA, we use
+Nsight Systems (\texttt{nsys}) for timeline analysis and Nsight Compute
+(\texttt{ncu}) for kernel-level counters. For AMD, \texttt{rocprof} and Omniperf.
+For Intel, VTune. PTX (NVIDIA) and GCN (AMD) generated code is inspected
+side-by-side with the native baseline.
+
+\subsection{Overhead Attribution}
+
+TODO: describe the four-category attribution methodology.
+
+\subsection{Benchmarks and Implementations}
+
+TODO: table of 7 kernels, sources, and available abstraction implementations.

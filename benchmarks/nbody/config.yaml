@@ -1,0 +1,52 @@
+experiment_id: E7
+kernel: nbody
+description: "N-Body pairwise force calculation — molecular dynamics with cutoff radius"
+group: irregular
+source: "CoMD (Mantevo), miniMD"
+primary_metric: ns_per_day
+secondary_metric: throughput_gflops
+
+problem_sizes:
+  small:
+    atoms: 32000
+    description: "Single GPU — correctness and warm-up"
+  medium:
+    atoms: 256000
+    description: "Typical production run"
+  large:
+    atoms: 2000000
+    description: "Memory-limited — stress tests neighbor list updates"
+
+timing:
+  warmup_iterations: 10
+  timed_iterations: 30
+  timesteps_per_run: 100
+  statistics: [median, iqr, min, max]
+  outlier_threshold_sigma: 2.0
+
+cutoff_radius: 5.0   # Angstroms — controls neighbor list density
+neighbor_list_rebuild_freq: 20
+
+abstractions:
+  - native
+  - kokkos
+  - raja
+  - sycl
+  - julia        # partial — complex control flow challenges JIT
+
+platforms:
+  - nvidia_a100
+  - amd_mi250x
+  - intel_pvc
+
+notes:
+  - "Production workload — bridges to real application validation"
+  - "Tests dynamic data structure handling (neighbor lists)"
+  - "Irregular neighbor lists, complex control flow, high AI but irregular memory"
+
+correctness:
+  tolerance: 1.0e-4   # Relaxed — floating-point order sensitivity in reductions
+  reference: native
+
+deep_profiling_trigger:
+  overhead_threshold: 0.15

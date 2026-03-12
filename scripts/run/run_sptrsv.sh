@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Run SpTRSV (E5).
+# Usage: ./scripts/run/run_sptrsv.sh --platform nvidia_a100 --reps 30
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+RESULTS_BASE="${REPO_ROOT}/results"
+
+PLATFORM="nvidia_a100"; ABSTRACTION="all"; REPS=30
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --platform) PLATFORM="$2"; shift 2 ;;
+        --abstraction) ABSTRACTION="$2"; shift 2 ;;
+        --reps) REPS="$2"; shift 2 ;;
+        *) echo "Unknown: $1"; exit 1 ;;
+    esac
+done
+
+OUT_DIR="${RESULTS_BASE}/${PLATFORM}/sptrsv"
+mkdir -p "${OUT_DIR}"
+echo "[run_sptrsv] Placeholder — implement SpTRSV kernel invocation."

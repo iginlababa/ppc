@@ -1,0 +1,1 @@
+experiment_id,kernel_time_ms,launch_overhead_ms,memory_transfer_mb,occupancy_percent,sm_efficiency_percent,memory_bandwidth_achieved_gbs,l2_cache_hit_rate,warp_divergence_percent,register_usage,profiler_tool

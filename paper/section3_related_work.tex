@@ -1,0 +1,37 @@
+% §3 Related Work
+% Status: Written (needs gap statement bridge)
+
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Portability Framework Benchmarks}
+
+Deakin et al.~\cite{Deakin2019} evaluate BabelStream across multiple programming
+models on CPU and GPU, establishing a methodology for bandwidth benchmarking.
+McIntosh-Smith et al.~\cite{McIntoshSmith2021} extend this to OpenMP target offload.
+Our work extends this line by measuring \emph{all five layers simultaneously} on all
+three current GPU vendor platforms and attributing root causes.
+
+\subsection{ECP Application Studies}
+
+Evans et al.~\cite{Evans2022} survey 62 ECP applications and find that $\sim$30\%
+use Kokkos, $\sim$20\% use RAJA, and portability is often achieved at $>15\%$
+performance cost. We provide the methodology needed to determine \emph{when}
+that cost is acceptable.
+
+\subsection{Julia for HPC}
+
+Godoy et al.~\cite{Godoy2023} benchmark Julia GPU performance and identify
+significant variance across platforms. We reproduce the DGEMM gap on NVIDIA and
+identify its root cause via PTX inspection (Section~\ref{sec:taxonomy}).
+
+\subsection{Performance Attribution}
+
+TODO: cite relevant work on overhead attribution, roofline analysis.
+
+\subsection{Gap Statement}
+
+% TODO: Write gap bridge from prior work to this paper's contribution.
+% Key gap: no prior work provides (a) simultaneous cross-layer comparison on 3 current platforms,
+% (b) root cause attribution to compiler/runtime/memory/API categories, or
+% (c) an actionable decision framework with empirically derived thresholds.

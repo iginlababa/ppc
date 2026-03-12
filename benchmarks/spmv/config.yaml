@@ -1,0 +1,48 @@
+experiment_id: E4
+kernel: spmv
+description: "Sparse Matrix-Vector Multiplication — y = A * x (CSR format)"
+group: semi_irregular
+source: "RAJAPerf, Kokkos-Kernels, SuiteSparse Matrix Collection"
+primary_metric: throughput_gflops
+flops_formula: "(2 * nnz) / time_seconds / 1e9"
+
+matrix_variants:
+  structured:
+    description: "2D/3D Laplacian — regular sparsity pattern"
+    sizes: [1000x1000, 100x100x100]
+  power_law:
+    description: "Social network graph — highly skewed degree distribution"
+    sizes: [scale20, scale22]
+  random:
+    description: "Erdos-Renyi random sparse matrix — worst-case irregularity"
+    density: [0.001, 0.01]
+
+timing:
+  warmup_iterations: 10
+  timed_iterations: 30
+  statistics: [median, iqr, min, max]
+  outlier_threshold_sigma: 2.0
+
+abstractions:
+  - native
+  - kokkos
+  - raja
+  - sycl
+  - julia
+
+platforms:
+  - nvidia_a100
+  - amd_mi250x
+  - intel_pvc
+
+notes:
+  - "Workhorse of iterative solvers — SpMV dominates GMRES/CG runtime"
+  - "Tests indirect memory access handling"
+  - "Known RAJA overhead pattern (Pattern 1 in taxonomy — Launch Overhead Dominance)"
+
+correctness:
+  tolerance: 1.0e-6
+  reference: native
+
+deep_profiling_trigger:
+  overhead_threshold: 0.15

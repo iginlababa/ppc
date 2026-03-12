@@ -1,0 +1,52 @@
+experiment_id: E2
+kernel: dgemm
+description: "Dense matrix multiplication — C = A x B (FP64, blocked)"
+group: regular
+source: "RAJAPerf Suite, Julia microbenchmarks (Godoy et al.)"
+primary_metric: throughput_gflops
+flops_formula: "(2 * N^3) / time_seconds / 1e9"
+
+problem_sizes:
+  small:
+    n: 1024
+    description: "Warm-up / correctness verification"
+  medium:
+    n: 4096
+    description: "Realistic HPC problem size"
+  large:
+    n: 16384
+    description: "Memory-bound regime — stress tests compiler blocking"
+
+timing:
+  warmup_iterations: 10
+  timed_iterations: 30
+  statistics: [median, iqr, min, max]
+  outlier_threshold_sigma: 2.0
+
+abstractions:
+  - native
+  - kokkos
+  - raja
+  - sycl
+  - julia
+
+platforms:
+  - nvidia_a100
+  - amd_mi250x
+  - intel_pvc
+
+peak_flops_gflops:
+  nvidia_a100: 19500   # 19.5 TFLOP/s FP64
+  amd_mi250x: 47900    # 47.9 TFLOP/s FP64
+  intel_pvc: 22200     # 22.2 TFLOP/s FP64
+
+notes:
+  - "Known Julia/NVIDIA gap from Godoy et al. 2023 — reproduce and explain"
+  - "Test compiler optimization quality and memory layout awareness"
+
+correctness:
+  tolerance: 1.0e-6
+  reference: native
+
+deep_profiling_trigger:
+  overhead_threshold: 0.15

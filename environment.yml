@@ -1,0 +1,43 @@
+name: hpc-abstraction
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+  - pip
+
+  # Data processing
+  - pandas>=2.0
+  - numpy>=1.24
+
+  # Visualization
+  - matplotlib>=3.7
+  - seaborn>=0.12
+
+  # Interactive analysis
+  - jupyter>=1.0
+  - jupyterlab>=4.0
+  - nbformat>=5.7
+
+  # Utilities
+  - pyyaml>=6.0
+  - tqdm>=4.65
+  - click>=8.1
+  - rich>=13.0
+
+  # Testing
+  - pytest>=7.4
+  - pytest-cov>=4.1
+
+  # Build tools
+  - cmake>=3.20
+  - ninja
+
+  # Documentation
+  - pip:
+    - jsonschema>=4.17
+    - tabulate>=0.9
+
+# Activate with: conda activate hpc-abstraction
+# Update when adding deps: conda env update --file environment.yml --prune

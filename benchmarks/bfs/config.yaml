@@ -1,0 +1,55 @@
+experiment_id: E6
+kernel: bfs
+description: "Breadth-First Search — level-synchronous graph traversal"
+group: irregular
+source: "Graph500 reference, GAP Benchmark Suite"
+primary_metric: gteps
+gteps_formula: "edges_traversed / time_seconds / 1e9"
+
+graph_variants:
+  rmat:
+    description: "RMAT graph — power-law degree distribution (Graph500 standard)"
+    scale: 22
+    edge_factor: 16
+  road:
+    description: "Road network — low average degree, long diameter"
+    dataset: "USA road network"
+  random:
+    description: "Erdos-Renyi random graph — worst-case load imbalance"
+    n: 4194304   # 2^22 vertices
+    m: 67108864  # 2^26 edges
+
+timing:
+  warmup_iterations: 10
+  timed_iterations: 30
+  statistics: [median, iqr, min, max]
+  outlier_threshold_sigma: 2.0
+
+abstractions:
+  - native
+  - kokkos
+  - raja         # partial
+  - sycl         # partial
+  - julia        # partial
+
+platforms:
+  - nvidia_a100
+  - amd_mi250x
+  - intel_pvc
+
+availability_notes:
+  raja: "RAJA BFS uses custom worklist — may not be available for all backends"
+  sycl: "SYCL BFS implementation availability depends on vendor"
+  julia: "Experimental — mark partial if JIT warm-up exceeds 30s"
+
+notes:
+  - "Limits test — expected to show abstraction failure"
+  - "Irregular memory access, extreme load imbalance, control flow divergence, atomics"
+  - "Feeds taxonomy irregular patterns category"
+
+correctness:
+  tolerance: 0     # BFS result is exact — vertex counts must match exactly
+  reference: native
+
+deep_profiling_trigger:
+  overhead_threshold: 0.15

@@ -1,0 +1,33 @@
+% §8 Validation
+% Status: Pending (Month 9)
+
+\section{Validation}
+\label{sec:validation}
+
+\subsection{Retrospective Validation}
+
+We test whether the decision framework would have predicted the actual abstraction
+choices made in production ECP codes. We select 5--8 applications from Evans et al.'s
+survey~\cite{Evans2022}, profile their hotspot kernels, apply the framework, and
+compare to developer choices.
+
+Target case studies: ExaSMR (Kokkos), QMCPACK (CUDA+OpenMP hybrid), LAMMPS (Kokkos + native CUDA).
+
+TODO: results (Month 9).
+
+\subsection{Prospective Validation}
+
+We collaborate with 2--3 active application teams porting to new architectures.
+
+TODO: results (Month 9).
+
+\subsection{Tool Accuracy}
+
+% Fig 21
+\begin{figure}[ht]
+    \centering
+    % \includegraphics[width=0.7\linewidth]{figures/fig21_validation.pdf}
+    \caption{\texttt{abstraction-advisor} predicted PPC vs.\ actual measured PPC
+             on held-out configurations.}
+    \label{fig:validation}
+\end{figure}

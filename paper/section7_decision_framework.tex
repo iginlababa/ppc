@@ -1,0 +1,43 @@
+% §7 Decision Framework
+% Status: Pending data
+
+\section{Decision Framework}
+\label{sec:framework}
+
+\subsection{Workload Characterization}
+
+Before a recommendation can be made, five workload characteristics must be measured:
+memory regularity ($\in [0,1]$), arithmetic intensity (FLOP/byte), kernel duration ($\mu$s),
+control flow divergence ($\in [0,1]$), and data structure type.
+
+\subsection{Decision Logic}
+
+TODO: describe the rule-based logic from analysis/decision\_framework.py.
+Insert Fig~\ref{fig:framework_flowchart}.
+
+\begin{figure}[ht]
+    \centering
+    % \includegraphics[width=0.8\linewidth]{figures/fig20_decision_framework.pdf}
+    \caption{Decision framework flowchart. Input: workload profile. Output: abstraction strategy.}
+    \label{fig:framework_flowchart}
+\end{figure}
+
+\subsection{Empirically Derived Thresholds}
+
+The following thresholds are determined from the experimental campaign:
+
+\begin{table}[ht]
+\centering
+\caption{Empirically derived decision thresholds. TODO: fill in after experiments.}
+\begin{tabular}{lrr}
+\toprule
+Threshold & Hypothetical & Empirical \\
+\midrule
+Memory regularity cutoff & 0.8 & TODO \\
+Minimum kernel duration & 100 $\mu$s & TODO \\
+PPC success threshold & 0.80 & TODO \\
+Control divergence limit & 0.3 & TODO \\
+\bottomrule
+\end{tabular}
+\label{tab:thresholds}
+\end{table}

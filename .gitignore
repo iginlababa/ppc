@@ -1,0 +1,93 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ── Environment ───────────────────────────────────────────────────────────────
+.env
+.venv/
+env/
+venv/
+*.conda
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+*.a
+*.o
+*.d
+
+# ── Raw experiment output ─────────────────────────────────────────────────────
+# .out files are tracked via Git LFS (see .gitattributes)
+# Large CSVs in data/raw/ are also LFS-tracked
+results/**/*.out
+results/**/*.nsys-rep
+results/**/*.ncu-rep
+results/**/*.csv
+
+# Profiling tool outputs
+results/**/*.db
+results/**/*.sqlite
+results/**/omniperf_*/
+
+# ── Data — raw files are LFS-tracked ─────────────────────────────────────────
+# data/raw/ — large CSVs, tracked via Git LFS (.gitattributes)
+# data/processed/ — generated, not committed (re-run analysis scripts)
+data/processed/
+
+# taxonomy.json and header-only CSVs ARE committed (small, tracked normally)
+# Do NOT ignore data/performance.csv, data/profiling_metrics.csv, etc.
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── LaTeX ────────────────────────────────────────────────────────────────────
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.log
+paper/*.out
+paper/*.toc
+paper/*.synctex.gz
+paper/*.pdf
+# Keep figures directory tracked, but ignore generated figure files
+# (they are regenerated from raw data — commit source data, not figures)
+paper/figures/*.pdf
+paper/figures/*.png
+paper/figures/*.svg
+
+# ── Containers ───────────────────────────────────────────────────────────────
+*.sif
+*.img
+
+# ── Secrets / credentials ────────────────────────────────────────────────────
+.env
+secrets/
+*.pem
+*.key

@@ -1,0 +1,51 @@
+experiment_id: E1
+kernel: stream
+description: "STREAM Triad bandwidth benchmark — A[i] = B[i] + scalar * C[i]"
+group: regular
+source: BabelStream
+primary_metric: bandwidth_gbs
+bandwidth_formula: "(3 * N * 8) / time_seconds / 1e9"
+
+problem_sizes:
+  small:
+    n: 1048576        # 2^20 ~ 1M elements
+    total_bytes: 25165824  # 3 arrays * 1M * 8 bytes = 24 MB
+    description: "Exposes launch overhead and cache effects"
+  medium:
+    n: 67108864       # 2^26 ~ 67M elements
+    total_bytes: 1610612736  # ~1.6 GB
+    description: "Realistic working set"
+  large:
+    n: 268435456      # 2^28 ~ 268M elements
+    total_bytes: 6442450944  # ~6.4 GB
+    description: "Forces DRAM saturation — must exceed L2 cache"
+
+timing:
+  warmup_iterations: 10
+  timed_iterations: 30
+  statistics: [median, iqr, min, max]
+  outlier_threshold_sigma: 2.0
+
+abstractions:
+  - native
+  - kokkos
+  - raja
+  - sycl
+  - julia
+
+platforms:
+  - nvidia_a100
+  - amd_mi250x
+  - intel_pvc
+
+peak_bandwidth_gbs:
+  nvidia_a100: 2039
+  amd_mi250x: 3277
+  intel_pvc: 3276
+
+correctness:
+  tolerance: 1.0e-6
+  reference: native
+
+deep_profiling_trigger:
+  overhead_threshold: 0.15   # trigger if abstraction < 0.85 * native

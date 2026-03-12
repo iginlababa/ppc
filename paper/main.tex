@@ -1,0 +1,64 @@
+\documentclass[sigconf,review]{acmart}
+
+% ── Packages ──────────────────────────────────────────────────────────────────
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% ── Metadata ──────────────────────────────────────────────────────────────────
+\acmConference[SC '26]{International Conference for High Performance
+Computing, Networking, Storage and Analysis}{November 2026}{Atlanta, GA, USA}
+
+\title{Measurement-Driven Selective Abstraction for Performance-Portable HPC Software}
+
+\author{TODO}
+\affiliation{\institution{TODO}}
+\email{todo@example.com}
+
+% ── Abstract ──────────────────────────────────────────────────────────────────
+\begin{abstract}
+TODO: Write abstract after experimental results are complete.
+Key messages: (1) empirical taxonomy of abstraction failure modes,
+(2) measurement methodology for cross-layer performance attribution,
+(3) quantified decision framework with empirically derived thresholds,
+(4) decision support tool validated on production HPC codes.
+\end{abstract}
+
+% ── CCS Concepts ──────────────────────────────────────────────────────────────
+\begin{CCSXML}
+<ccs2012>
+<concept>
+<concept_id>10011007.10011006.10011008.10011009.10011012</concept_id>
+<concept_desc>Software and its engineering~Parallel programming languages</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+</ccs2012>
+\end{CCSXML}
+\ccsdesc[500]{Software and its engineering~Parallel programming languages}
+\keywords{performance portability, GPU programming, Kokkos, RAJA, SYCL, Julia, abstraction layers}
+
+% ── Document ──────────────────────────────────────────────────────────────────
+\begin{document}
+\maketitle
+
+\input{introduction}
+\input{section2_background}
+\input{section3_related_work}
+\input{section4_methodology}
+\input{section5_experiments}
+\input{section6_taxonomy}
+\input{section7_decision_framework}
+\input{section8_validation}
+\input{section9_conclusion}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
+
+\end{document}

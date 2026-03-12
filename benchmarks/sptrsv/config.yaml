@@ -1,0 +1,49 @@
+experiment_id: E5
+kernel: sptrsv
+description: "Sparse Triangular Solve — forward/backward substitution"
+group: semi_irregular
+source: "Kokkos-Kernels, RAJA SpTRSV implementations"
+primary_metric: solve_time_ms
+secondary_metric: throughput_gflops
+solve_direction: [forward, backward]
+
+matrix_variants:
+  structured:
+    description: "Lower triangular from structured 3D Laplacian"
+  random:
+    description: "Random lower triangular — worst-case level sets"
+  circuit:
+    description: "Circuit simulation matrix — deep dependency chains"
+
+timing:
+  warmup_iterations: 10
+  timed_iterations: 30
+  statistics: [median, iqr, min, max]
+  outlier_threshold_sigma: 2.0
+
+abstractions:
+  - native
+  - kokkos
+  - raja
+  - sycl         # partial — may not have full implementation
+  - julia        # partial — level-set parallelism experimental in Julia
+
+platforms:
+  - nvidia_a100
+  - amd_mi250x
+  - intel_pvc
+
+availability_notes:
+  sycl: "Level-set SpTRSV not in all SYCL implementations — mark partial if absent"
+  julia: "Experimental — do not block paper on Julia SpTRSV"
+
+notes:
+  - "Sequential dependencies require level-set parallelism"
+  - "Tests task-based abstractions' ability to expose parallelism in apparently sequential code"
+
+correctness:
+  tolerance: 1.0e-6
+  reference: native
+
+deep_profiling_trigger:
+  overhead_threshold: 0.15

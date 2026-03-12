@@ -1,0 +1,40 @@
+Bootstrap: docker
+From: nvcr.io/nvidia/cuda:12.3.0-devel-ubuntu22.04
+
+# Singularity definition for HPC systems that do not allow Docker.
+# Build: singularity build hpc-abstraction-nvidia.sif containers/Singularity.def
+# Run:   singularity exec --nv hpc-abstraction-nvidia.sif bash
+
+%labels
+    Author TODO
+    Version 1.0
+    Description HPC abstraction benchmarking — NVIDIA (Singularity)
+
+%environment
+    export PATH=/opt/conda/bin:$PATH
+    export Kokkos_ROOT=/opt/kokkos
+    export CUDA_HOME=/usr/local/cuda
+
+%post
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake ninja-build git wget curl \
+        python3 python3-pip python3-dev gcc-12 g++-12
+
+    # Conda
+    wget -qO /tmp/miniforge.sh \
+        https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+    bash /tmp/miniforge.sh -b -p /opt/conda
+    rm /tmp/miniforge.sh
+    export PATH=/opt/conda/bin:$PATH
+
+    # Python environment
+    conda env create -f /workspace/environment.yml || true
+    conda clean -afy
+
+%runscript
+    exec "$@"
+
+%help
+    Singularity container for reproducible HPC abstraction benchmarking.
+    Use --nv flag to enable GPU access: singularity exec --nv <sif> bash
+    Mount project directory: singularity exec --nv --bind /path/to/repo:/workspace <sif> bash

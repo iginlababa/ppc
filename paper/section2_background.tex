@@ -1,0 +1,44 @@
+% §2 Background
+% Status: Written (stub)
+
+\section{Background}
+\label{sec:background}
+
+\subsection{Performance Portability}
+
+Performance portability (PP) quantifies how well a single codebase performs across
+different hardware platforms. Following~\cite{Pennycook2019}, we use the
+Performance Portability Coefficient (PPC):
+
+\begin{equation}
+\label{eq:ppc}
+\text{PPC}(a, p) = \frac{|H|}{\sum_{h \in H} \frac{1}{e_h(a, p)}}
+\end{equation}
+
+where $H$ is the set of platforms with working implementations, and $e_h(a, p)$
+is the efficiency of abstraction $a$ on problem $p$ relative to the native baseline
+on platform $h$.
+
+\subsection{GPU Abstraction Layers}
+
+\paragraph{Kokkos~\cite{Carter2014}.}
+Data structure abstraction built on portable Views and Execution Spaces.
+Widely adopted in ECP codes ($\sim$30\% per Evans et al.~\cite{Evans2022}).
+
+\paragraph{RAJA~\cite{Hornung2014}.}
+Loop abstraction: execution policies, index sets, kernel fusion.
+Different philosophy from Kokkos --- loop-level vs.\ data-structure-level.
+
+\paragraph{SYCL~\cite{Reyes2020}.}
+Open Khronos standard. Vendor-neutral heterogeneous programming.
+Implementations: Intel DPC++, AdaptiveCpp (hipSYCL).
+
+\paragraph{Julia~\cite{Bezanson2017}.}
+High-level language with JIT compilation. CUDA.jl/AMDGPU.jl backends.
+Godoy et al.~\cite{Godoy2023} show Julia achieves $>0.9$ efficiency on AMD
+but struggles on NVIDIA for DGEMM --- a pattern we investigate.
+
+\subsection{Hardware Platforms}
+
+TODO: Table of three target platforms (A100, MI250X, PVC) with peak BW and FLOP/s.
+See project\_spec.md \S5.1.

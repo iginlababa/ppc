@@ -1,0 +1,32 @@
+% §9 Conclusion
+% Status: Pending
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+TODO: Write after all results are complete.
+
+Key messages to convey:
+\begin{itemize}
+    \item First systematic, measurement-driven classification of abstraction failure modes
+    \item Reproducible protocol that enables the community to repeat and extend this work
+    \item Empirically grounded thresholds replace guesswork in abstraction selection
+    \item \texttt{abstraction-advisor} tool makes the framework actionable
+\end{itemize}
+
+\subsection{Limitations}
+
+\begin{itemize}
+    \item Single-node GPU only --- no distributed-memory MPI layer
+    \item Snapshot in time --- compiler and framework quality improves each release
+    \item 7 kernels may not cover all HPC workload patterns
+\end{itemize}
+
+\subsection{Future Work}
+
+\begin{itemize}
+    \item Extend to multi-GPU and distributed-memory configurations
+    \item Automate PTX/GCN inspection for faster root cause attribution
+    \item Living taxonomy database with community contributions
+    \item Extend to emerging platforms (Grace-Hopper, MI300X)
+\end{itemize}
