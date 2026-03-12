@@ -91,3 +91,6 @@ paper/figures/*.svg
 secrets/
 *.pem
 *.key
+
+# ── Claude Code session memory ────────────────────────────────────────────────
+.claude/
