@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# stream-julia — wrapper that invokes kernel_stream_julia.jl via Julia.
+#
+# This script is the "binary" that run_stream.sh and the correctness test
+# expect at build/stream/julia_<platform>/stream-julia.  The CMake custom
+# target (STREAM_ENABLE_JULIA) generates a copy of this wrapper in the build
+# directory with JULIA_SCRIPT_PATH set to the absolute path of the .jl file.
+#
+# Environment variables:
+#   JULIA_BIN          Path to julia executable (default: julia on PATH)
+#   JULIA_NUM_THREADS  Passed through to Julia (default: auto)
+#   STREAM_USE_FLOAT   Set to 1 for single precision (default: double)
+
+set -euo pipefail
+
+JULIA_BIN="${JULIA_BIN:-julia}"
+
+# Resolve the .jl script path relative to this wrapper's location.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JL_SCRIPT="${SCRIPT_DIR}/kernel_stream_julia.jl"
+
+# Project.toml lives alongside the .jl file.
+JULIA_PROJECT="${SCRIPT_DIR}"
+
+exec "${JULIA_BIN}" \
+    --project="${JULIA_PROJECT}" \
+    --startup-file=no \
+    --optimize=3 \
+    "${JL_SCRIPT}" \
+    "$@"

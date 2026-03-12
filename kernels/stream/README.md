@@ -14,7 +14,9 @@ parameters and `project_spec.md §8.2` for the full specification.
 | `kernel_stream_kokkos.cpp` | Kokkos portable abstraction (CUDA/HIP/OpenMP backends) |
 | `kernel_stream_raja.cpp` | RAJA portable abstraction (CUDA/HIP/OpenMP backends) |
 | `kernel_stream_sycl.cpp` | SYCL 2020 (Intel DPC++ / AdaptiveCpp, GPU and CPU backends) |
-| `kernel_stream_julia.jl` | Julia (CUDA.jl / AMDGPU.jl) — TODO |
+| `kernel_stream_julia.jl` | Julia/CUDA.jl — explicit `@cuda` kernels, CUDA event timing |
+| `stream-julia` | Shell wrapper — invokes `julia --project=. kernel_stream_julia.jl` |
+| `Project.toml` | Julia package environment (CUDA.jl ≥ 5, Julia ≥ 1.9) |
 | `kernel_stream_numba.py` | Python / Numba CUDA — TODO |
 | `CMakeLists.txt` | CMake build for C++/CUDA/HIP/Kokkos/RAJA/SYCL targets |
 

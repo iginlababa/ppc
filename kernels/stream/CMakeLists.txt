@@ -102,6 +102,7 @@ message(STATUS "  ./stream-kokkos --arraysize 268435456 --numtimes 30 --warmup 1
 message(STATUS "  ./stream-raja   --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "  ./stream-sycl   --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "  ./stream-hip    --arraysize 268435456 --numtimes 30 --warmup 10")
+message(STATUS "  ./stream-julia  --arraysize 268435456 --numtimes 30 --warmup 10")
 message(STATUS "")
 
 # ── Kokkos abstraction (abstraction=kokkos) ───────────────────────────────────
@@ -281,8 +282,58 @@ else()
     message(STATUS "  Enable with -DSTREAM_ENABLE_HIP=ON -DCMAKE_CXX_COMPILER=hipcc")
 endif()
 
+# ── Julia abstraction (abstraction=julia) ────────────────────────────────────
+# Julia does not compile to a native binary.  The "target" is a shell wrapper
+# (stream-julia) that invokes julia --project=... kernel_stream_julia.jl.
+# The wrapper is copied into the build directory so that run_stream.sh finds
+# it at the expected path: build/stream/julia_<platform>/stream-julia.
+#
+# Requires:
+#   - Julia ≥ 1.9 on PATH (or set JULIA_BIN environment variable)
+#   - CUDA.jl ≥ 5.0 installed in the project environment:
+#       julia --project=kernels/stream/ -e 'using Pkg; Pkg.instantiate()'
+#
+# Enable with:
+#   cmake -S kernels/stream -B build/stream/julia_nvidia_a100 \
+#         -DSTREAM_ENABLE_JULIA=ON
+
+option(STREAM_ENABLE_JULIA "Install stream-julia wrapper (requires Julia + CUDA.jl)" OFF)
+
+if(STREAM_ENABLE_JULIA)
+    message(STATUS "Julia enabled — installing stream-julia wrapper")
+
+    # Copy the wrapper and script into the build directory together so that
+    # the wrapper's relative path resolution (SCRIPT_DIR) finds the .jl file.
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/stream-julia
+        ${CMAKE_CURRENT_BINARY_DIR}/stream-julia
+        COPYONLY
+    )
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/kernel_stream_julia.jl
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel_stream_julia.jl
+        COPYONLY
+    )
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/Project.toml
+        ${CMAKE_CURRENT_BINARY_DIR}/Project.toml
+        COPYONLY
+    )
+
+    # Ensure the wrapper is executable after configure_file copies it
+    install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/stream-julia DESTINATION bin)
+    install(FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/kernel_stream_julia.jl
+        ${CMAKE_CURRENT_SOURCE_DIR}/Project.toml
+        DESTINATION bin)
+
+    message(STATUS "  Julia: run 'julia --project=kernels/stream/ -e \"using Pkg; Pkg.instantiate()\"' to install deps")
+else()
+    message(STATUS "Julia disabled — stream-julia target skipped")
+    message(STATUS "  Enable with -DSTREAM_ENABLE_JULIA=ON (requires Julia ≥ 1.9)")
+endif()
+
 # ── Placeholder targets for future implementations ────────────────────────────
 # Each target follows the naming convention: stream-<abstraction>
 
-# stream-julia     → run via Julia script          (CUDA.jl / AMDGPU.jl)
 # stream-numba     → run via Python script         (Numba CUDA)
