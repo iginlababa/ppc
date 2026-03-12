@@ -11,7 +11,7 @@ parameters and `project_spec.md §8.2` for the full specification.
 | `stream_common.h` | Shared types, constants, stats, output format — included by ALL implementations |
 | `kernel_stream_cuda.cu` | CUDA native baseline (`abstraction=native` on NVIDIA) |
 | `kernel_stream_hip.cpp` | HIP native baseline — TODO |
-| `kernel_stream_kokkos.cpp` | Kokkos — TODO |
+| `kernel_stream_kokkos.cpp` | Kokkos portable abstraction (CUDA/HIP/OpenMP backends) |
 | `kernel_stream_raja.cpp` | RAJA — TODO |
 | `kernel_stream_sycl.cpp` | SYCL / DPC++ — TODO |
 | `kernel_stream_julia.jl` | Julia (CUDA.jl / AMDGPU.jl) — TODO |
