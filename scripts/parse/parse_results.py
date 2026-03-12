@@ -34,16 +34,43 @@ COLUMNS = [
 
 # ── Per-kernel parsers ────────────────────────────────────────────────────────
 
-def parse_babelstream(raw_text: str) -> list[dict]:
+def parse_stream(raw_text: str) -> list[dict]:
     """
-    BabelStream output format:
-        BW = 1234.56 GB/s
-    Returns list of {execution_time_ms, throughput} per run line.
+    Parse output from kernels/stream/kernel_stream_*.{cu,cpp,py,jl}.
+
+    Each timed run produces a line:
+      STREAM_RUN kernel=triad run=1 n=268435456 time_ms=0.52340 bw_gbs=1823.45
+
+    A metadata line provides array size:
+      STREAM_META abstraction=cuda n=268435456 ...
+
+    Returns one dict per STREAM_RUN line, keyed to the Triad kernel (primary
+    E1 metric).  Other kernels (copy, mul, add, dot) are ignored here — they
+    are secondary and stored in separate output files if needed.
     """
     rows = []
-    for m in re.finditer(r"BW\s*=\s*([\d.]+)\s*GB/s", raw_text):
-        bw = float(m.group(1))
-        rows.append({"throughput": bw, "execution_time_ms": float("nan")})
+
+    # Extract n from STREAM_META (used if not present in STREAM_RUN line)
+    meta_n = None
+    m_meta = re.search(r"STREAM_META\s+abstraction=\S+\s+n=(\d+)", raw_text)
+    if m_meta:
+        meta_n = int(m_meta.group(1))
+
+    for m in re.finditer(
+        r"STREAM_RUN\s+kernel=(\w+)\s+run=(\d+)\s+n=(\d+)\s+"
+        r"time_ms=([\d.eE+\-]+)\s+bw_gbs=([\d.eE+\-]+)",
+        raw_text,
+    ):
+        kernel_name = m.group(1)
+        if kernel_name != "triad":
+            continue  # E1 primary metric is Triad only
+        rows.append({
+            "run_id":            int(m.group(2)),
+            "problem_size_n":    int(m.group(3)),
+            "execution_time_ms": float(m.group(4)),
+            "throughput":        float(m.group(5)),  # GB/s
+        })
+
     return rows
 
 
@@ -58,7 +85,7 @@ def parse_rajaperf(raw_text: str) -> list[dict]:
 
 
 KERNEL_PARSERS = {
-    "stream": parse_babelstream,
+    "stream": parse_stream,
     "dgemm":  parse_rajaperf,
     "stencil": parse_rajaperf,
     "spmv":   parse_rajaperf,
@@ -96,22 +123,24 @@ def parse_file(raw_path: Path, platform: str) -> list[dict]:
     parsed_rows = parser(raw_text)
 
     rows = []
-    for run_id, prow in enumerate(parsed_rows, start=1):
+    for prow in parsed_rows:
+        # parse_stream embeds run_id; legacy parsers don't — fall back to enumerate
+        run_id = prow.get("run_id", len(rows) + 1)
         rows.append({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "experiment_id": make_experiment_id(kernel, abstraction, platform, size, run_id),
-            "kernel": kernel,
-            "abstraction": abstraction,
-            "platform": platform,
-            "problem_size": size,
-            "problem_size_n": "",   # TODO: extract from raw file header
-            "run_id": run_id,
-            "execution_time_ms": prow.get("execution_time_ms", ""),
-            "throughput": prow.get("throughput", ""),
-            "efficiency": "",       # computed post-hoc by compute_ppc.py
+            "timestamp":              datetime.now(timezone.utc).isoformat(),
+            "experiment_id":          make_experiment_id(kernel, abstraction, platform, size, run_id),
+            "kernel":                 kernel,
+            "abstraction":            abstraction,
+            "platform":               platform,
+            "problem_size":           size,
+            "problem_size_n":         prow.get("problem_size_n", ""),
+            "run_id":                 run_id,
+            "execution_time_ms":      prow.get("execution_time_ms", ""),
+            "throughput":             prow.get("throughput", ""),
+            "efficiency":             "",   # computed post-hoc by compute_ppc.py
             "hardware_state_verified": True,
-            "compiler_version": "",  # TODO: extract from env_log.txt
-            "framework_version": "", # TODO: extract from env_log.txt
+            "compiler_version":       "",   # TODO: extract from env_log.txt
+            "framework_version":      "",   # TODO: extract from env_log.txt
         })
     return rows
 
