@@ -25,15 +25,17 @@ import yaml
 
 # Peak hardware values from project_spec.md §5.2 and §9.2
 PEAK_BW_GBS = {
-    "nvidia_a100": 2039.0,
-    "amd_mi250x":  3277.0,
-    "intel_pvc":   3276.0,
+    "nvidia_rtx5060_laptop": 288.0,
+    "nvidia_a100":           2039.0,
+    "amd_mi250x":            3277.0,
+    "intel_pvc":             3276.0,
 }
 
 PEAK_FLOPS_GFLOPS = {
-    "nvidia_a100": 19500.0,
-    "amd_mi250x":  47900.0,
-    "intel_pvc":   22200.0,
+    "nvidia_rtx5060_laptop": 1700.0,   # FP64 ~1.7 TFLOP/s (RTX 5060 Laptop)
+    "nvidia_a100":           19500.0,
+    "amd_mi250x":            47900.0,
+    "intel_pvc":             22200.0,
 }
 
 # Bandwidth-bound kernels — primary metric is GB/s

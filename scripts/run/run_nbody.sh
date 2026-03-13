@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RESULTS_BASE="${REPO_ROOT}/results"
 
-PLATFORM="nvidia_a100"; ABSTRACTION="all"; SIZE="all"; REPS=30
+PLATFORM="nvidia_rtx5060_laptop"; ABSTRACTION="all"; SIZE="all"; REPS=30
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --platform) PLATFORM="$2"; shift 2 ;;
