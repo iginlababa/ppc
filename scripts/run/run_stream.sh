@@ -111,14 +111,30 @@ find_binary() {
     local abs="$1"
     local bin_name="${BINARY_NAME[$abs]:-stream-${abs}}"
     local prefix="${bin_name#stream-}"
+    # Try exact platform match first (e.g. raja_nvidia_rtx5060_laptop)
     local p="${BUILD_BASE}/${prefix}_${PLATFORM}/${bin_name}"
     [[ -x "${p}" ]] && { echo "${p}"; return 0; }
+    # Try base platform with known run-tags stripped (e.g. _locked, _v2)
+    local base_plat="${PLATFORM}"
+    base_plat="${base_plat%_locked}"
+    if [[ "${base_plat}" != "${PLATFORM}" ]]; then
+        local pb="${BUILD_BASE}/${prefix}_${base_plat}/${bin_name}"
+        [[ -x "${pb}" ]] && { echo "${pb}"; return 0; }
+    fi
     local p2="${BUILD_BASE}/${bin_name}"
     [[ -x "${p2}" ]] && { echo "${p2}"; return 0; }
+    # Last resort: find any matching binary (sorted to prefer platform-specific)
+    local best=""
     for d in "${BUILD_BASE}"/*/; do
-        [[ -x "${d}${bin_name}" ]] && { echo "${d}${bin_name}"; return 0; }
+        if [[ -x "${d}${bin_name}" ]]; then
+            # Prefer dirs containing the base platform name
+            if [[ "${d}" == *"${base_plat}"* ]]; then
+                echo "${d}${bin_name}"; return 0
+            fi
+            [[ -z "${best}" ]] && best="${d}${bin_name}"
+        fi
     done
-    echo ""
+    echo "${best}"
 }
 
 # ── GPU clock management ──────────────────────────────────────────────────────

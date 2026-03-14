@@ -50,16 +50,17 @@ DATA_PROC  = os.path.join(REPO_ROOT, "data", "processed")
 FIGURES    = os.path.join(REPO_ROOT, "figures")
 os.makedirs(FIGURES, exist_ok=True)
 
-PLATFORM     = "nvidia_rtx5060_laptop"
-PEAK_BW_GBS  = 288.0   # GDDR7 theoretical spec (config.yaml); GPU boosts above this
+PLATFORM     = "nvidia_rtx5060_laptop_locked"
+PEAK_BW_GBS  = 384.0   # GDDR7 12001 MHz × 128-bit × 2 theoretical peak
 
 # ── Abstraction ordering and colors ───────────────────────────────────────────
-ABSTRACTIONS = ["native", "kokkos", "julia", "numba"]
+ABSTRACTIONS = ["native", "kokkos", "raja", "julia", "numba"]
 
 # IBM colorblind-safe palette
 COLORS = {
     "native": "#648FFF",   # blue
     "kokkos": "#785EF0",   # violet
+    "raja":   "#FFB000",   # amber
     "julia":  "#DC267F",   # magenta
     "numba":  "#FE6100",   # orange
 }
@@ -67,6 +68,7 @@ COLORS = {
 LABELS = {
     "native": "CUDA (native)",
     "kokkos": "Kokkos",
+    "raja":   "RAJA",
     "julia":  "Julia/CUDA.jl",
     "numba":  "Numba",
 }
@@ -88,10 +90,6 @@ def load_raw() -> pd.DataFrame:
         files = sorted(glob.glob(pattern))
         for f in files:
             chunk = pd.read_csv(f)
-            # Keep only boost-regime native rows (batch 0 = 00:38 UTC) to match
-            # the abstraction thermal state; drop native batch 1 from viz.
-            if abs_name == "native":
-                chunk = chunk[chunk["timestamp"].str.startswith("2026-03-14T00")]
             frames.append(chunk)
     raw = pd.concat(frames, ignore_index=True)
     return raw
@@ -261,12 +259,6 @@ def fig5_cv(summary: pd.DataFrame):
                      linewidth=0.6, zorder=2)
         label_y = cv + 0.08
         ax.text(i, label_y, f"{cv:.2f}%", ha="center", va="bottom", fontsize=7.5)
-
-        # Annotate numba as thermally unstable
-        if abs_name == "numba":
-            ax.text(i, cv + 0.5, "thermally\nunstable",
-                    ha="center", va="bottom", fontsize=6.5,
-                    color="crimson", style="italic")
 
     ax.set_xticks(x)
     ax.set_xticklabels([LABELS[a] for a in ABSTRACTIONS], rotation=15, ha="right")

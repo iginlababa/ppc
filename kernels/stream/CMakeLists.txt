@@ -155,11 +155,30 @@ endif()
 find_package(RAJA QUIET)
 if(RAJA_FOUND)
     message(STATUS "RAJA ${RAJA_VERSION} found — building stream-raja")
+
+    # When RAJA's CUDA backend is active, kernel_stream_raja.cpp must be
+    # compiled by nvcc so that __CUDACC__ is defined and RAJA_LAMBDA expands
+    # to [=] __device__ __host__ (extended-lambda syntax).  Detect this by
+    # inspecting RAJA's interface link libraries for the "cuda" target.
+    get_target_property(_raja_iface_libs RAJA INTERFACE_LINK_LIBRARIES)
+    if("cuda" IN_LIST _raja_iface_libs)
+        set_source_files_properties(kernel_stream_raja.cpp PROPERTIES LANGUAGE CUDA)
+        message(STATUS "  RAJA CUDA backend detected — compiling kernel as CUDA TU")
+    endif()
+
     add_executable(stream-raja kernel_stream_raja.cpp)
     target_link_libraries(stream-raja PRIVATE RAJA)
     target_include_directories(stream-raja PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(stream-raja PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>: -O3 -Wall -Wextra>
+        $<$<COMPILE_LANGUAGE:CUDA>:
+            -O3
+            --use_fast_math
+            --generate-line-info
+            --expt-extended-lambda
+            --expt-relaxed-constexpr
+            -Xcompiler=-Wall,-Wextra
+        >
     )
     if(STREAM_USE_FLOAT)
         target_compile_definitions(stream-raja PRIVATE STREAM_USE_FLOAT)

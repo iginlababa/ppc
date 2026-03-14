@@ -5,16 +5,18 @@ E1 STREAM Triad — data processing pipeline.
 Loads raw per-abstraction CSVs, filters clean runs, removes warm-up,
 computes statistics and PPC, saves data/processed/e1_stream_summary.csv.
 
-Native baseline note
---------------------
-The native CSV contains two separate invocations of run_stream.sh:
-  Batch 0 (00:38 UTC): GPU cold → boost clocks → ~350 GB/s (runs 1-28 clean)
-  Batch 1 (01:41 UTC): GPU warm → throttled    → ~272 GB/s (runs 1-18 clean)
+Measurement protocol (locked-clock session, 2026-03-14)
+--------------------------------------------------------
+All 5 abstractions measured in a single session with:
+  - SM clock locked at 2092 MHz  (sudo nvidia-smi --lock-gpu-clocks=2100,2100)
+  - Memory clock locked at 9001 MHz → self-transitions to 12001 MHz after
+    ~40 iterations of sustained bandwidth load
+  - warmup=50 (10 pre-warmup + 50 warmup) ensures the 12001 MHz memory clock
+    state is reached before any timed run begins
+  - 30s cooldown between abstractions
 
-Kokkos / Julia / Numba ran right after batch 0 while the GPU was still in
-the same boost-clock thermal state: their hw_state=1 runs cluster at ~350 GB/s.
-We therefore use batch 0 as the canonical native baseline for PPC computation
-so that all abstractions are compared within the same thermal regime.
+All 5 abstractions (native, kokkos, raja, julia, numba) converge on
+~345-350 GB/s in the boosted memory-clock state.
 """
 
 import glob
@@ -31,10 +33,10 @@ DATA_PROC = os.path.join(REPO_ROOT, "data", "processed")
 os.makedirs(DATA_PROC, exist_ok=True)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-PLATFORM     = "nvidia_rtx5060_laptop"
-PEAK_BW_GBS  = 288.0   # GDDR7 128-bit theoretical peak (config.yaml)
+PLATFORM     = "nvidia_rtx5060_laptop_locked"
+PEAK_BW_GBS  = 384.0   # GDDR7 12001 MHz × 128-bit × 2 theoretical peak
 WARMUP_DROP  = 5       # discard first N run_ids per batch
-ABSTRACTIONS = ["native", "kokkos", "julia", "numba"]
+ABSTRACTIONS = ["native", "kokkos", "raja", "julia", "numba"]
 
 # ── Load raw CSVs ─────────────────────────────────────────────────────────────
 def load_e1_csvs() -> pd.DataFrame:

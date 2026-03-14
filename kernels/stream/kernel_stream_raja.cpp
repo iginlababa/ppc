@@ -63,7 +63,7 @@ static constexpr int STREAM_RAJA_BLOCK = 256;  // GPU thread-block size
         return p;
     }
     static void dev_free(StreamFloat* p)  { cudaFree(p); }
-    static void dev_sync()                { RAJA::synchronize<ExecPolicy>(); }
+    static void dev_sync()                { RAJA::synchronize<RAJA::cuda_synchronize>(); }
 
     static void dev_sample(const StreamFloat* d, size_t idx, StreamFloat* out) {
         cudaMemcpy(out, d + idx, sizeof(StreamFloat), cudaMemcpyDeviceToHost);
@@ -81,7 +81,7 @@ static constexpr int STREAM_RAJA_BLOCK = 256;  // GPU thread-block size
         return p;
     }
     static void dev_free(StreamFloat* p)  { hipFree(p); }
-    static void dev_sync()                { RAJA::synchronize<ExecPolicy>(); }
+    static void dev_sync()                { RAJA::synchronize<RAJA::hip_synchronize>(); }
 
     static void dev_sample(const StreamFloat* d, size_t idx, StreamFloat* out) {
         hipMemcpy(out, d + idx, sizeof(StreamFloat), hipMemcpyDeviceToHost);
@@ -128,7 +128,7 @@ static void do_init(StreamFloat* a, StreamFloat* b, StreamFloat* c, size_t n)
 {
     RAJA::forall<ExecPolicy>(
         RAJA::RangeSegment(0, static_cast<RAJA::Index_type>(n)),
-        RAJA_LAMBDA(RAJA::Index_type i) {
+        [=] RAJA_DEVICE (RAJA::Index_type i) {
             a[i] = STREAM_INIT_A;
             b[i] = STREAM_INIT_B;
             c[i] = STREAM_INIT_C;
@@ -142,7 +142,7 @@ static void do_triad(StreamFloat* a, StreamFloat* b, StreamFloat* c, size_t n)
     const StreamFloat scalar = STREAM_SCALAR;
     RAJA::forall<ExecPolicy>(
         RAJA::RangeSegment(0, static_cast<RAJA::Index_type>(n)),
-        RAJA_LAMBDA(RAJA::Index_type i) { a[i] = b[i] + scalar * c[i]; });
+        [=] RAJA_DEVICE (RAJA::Index_type i) { a[i] = b[i] + scalar * c[i]; });
     dev_sync();
 }
 
@@ -223,26 +223,26 @@ static PassBW run_pass(StreamFloat* a, StreamFloat* b, StreamFloat* c,
         // Copy: c[i] = a[i]
         bw.copy = time_kernel(
             [&]{ RAJA::forall<ExecPolicy>(range,
-                     RAJA_LAMBDA(RAJA::Index_type i) { c[i] = a[i]; }); },
+                     [=] RAJA_DEVICE (RAJA::Index_type i) { c[i] = a[i]; }); },
             copy_bandwidth_gbs);
 
         // Mul: b[i] = scalar * c[i]
         bw.mul = time_kernel(
             [&]{ RAJA::forall<ExecPolicy>(range,
-                     RAJA_LAMBDA(RAJA::Index_type i) { b[i] = scalar * c[i]; }); },
+                     [=] RAJA_DEVICE (RAJA::Index_type i) { b[i] = scalar * c[i]; }); },
             mul_bandwidth_gbs);
 
         // Add: c[i] = a[i] + b[i]
         bw.add = time_kernel(
             [&]{ RAJA::forall<ExecPolicy>(range,
-                     RAJA_LAMBDA(RAJA::Index_type i) { c[i] = a[i] + b[i]; }); },
+                     [=] RAJA_DEVICE (RAJA::Index_type i) { c[i] = a[i] + b[i]; }); },
             add_bandwidth_gbs);
     }
 
     // Triad: a[i] = b[i] + scalar * c[i]  — always timed (primary E1 metric)
     bw.triad = time_kernel(
         [&]{ RAJA::forall<ExecPolicy>(range,
-                 RAJA_LAMBDA(RAJA::Index_type i) { a[i] = b[i] + scalar * c[i]; }); },
+                 [=] RAJA_DEVICE (RAJA::Index_type i) { a[i] = b[i] + scalar * c[i]; }); },
         triad_bandwidth_gbs);
 
     if (all_kernels) {
@@ -251,7 +251,7 @@ static PassBW run_pass(StreamFloat* a, StreamFloat* b, StreamFloat* c,
         dev_sync();
         auto t0 = std::chrono::high_resolution_clock::now();
         RAJA::forall<ExecPolicy>(range,
-            RAJA_LAMBDA(RAJA::Index_type i) { dot_val += a[i] * b[i]; });
+            [=] RAJA_DEVICE (RAJA::Index_type i) { dot_val += a[i] * b[i]; });
         dev_sync();
         auto t1 = std::chrono::high_resolution_clock::now();
         double t = std::chrono::duration<double>(t1 - t0).count();

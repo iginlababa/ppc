@@ -185,6 +185,7 @@ build_variant() {
     local cmake_args=(
         cmake -S "${SOURCE_DIR}" -B "${build_dir}"
         -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_CUDA_HOST_COMPILER="$(command -v g++)"
         -DCMAKE_CUDA_COMPILER="${CUDA_COMPILER}"
         -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}"
         "${extra_flags[@]}"
