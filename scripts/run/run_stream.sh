@@ -94,8 +94,10 @@ SIZE_LIST=(small medium large)
 
 # ── Output paths ──────────────────────────────────────────────────────────────
 TODAY="$(date -u +%Y%m%d)"
-CSV_FILE="${DATA_RAW}/stream_${PLATFORM}_${TODAY}.csv"
+# CSV_FILE is set per-abstraction inside the main loop:
+#   stream_<abstraction>_<platform>_<YYYYMMDD>.csv
 RAW_OUT_DIR="${RESULTS_BASE}/${PLATFORM}/stream"
+CSV_FILE=""   # set per abstraction in main loop
 
 if [[ ${DRY_RUN} -eq 0 ]]; then
     mkdir -p "${DATA_RAW}" "${RAW_OUT_DIR}"
@@ -103,11 +105,6 @@ fi
 
 # hardware_state_verified: 1 = clean run, 0 = thermal outlier (>OUTLIER_THRESHOLD% from median)
 CSV_HEADER="timestamp,experiment_id,kernel,abstraction,platform,problem_size,problem_size_n,run_id,execution_time_ms,throughput,efficiency,hardware_state_verified,compiler_version,framework_version"
-
-if [[ ${DRY_RUN} -eq 0 ]] && [[ ! -s "${CSV_FILE}" ]]; then
-    echo "${CSV_HEADER}" > "${CSV_FILE}"
-    echo "[run_stream] Created ${CSV_FILE}"
-fi
 
 # ── Binary locator ────────────────────────────────────────────────────────────
 find_binary() {
@@ -336,11 +333,20 @@ echo "[run_stream] Pre-warmup iters:  ${PRE_WARMUP_ITERS} (discarded)"
 echo "[run_stream] Cooldown:          ${COOLDOWN}s between abstractions"
 echo "[run_stream] Outlier threshold: ${OUTLIER_THRESHOLD}% from median"
 [[ ${DRY_RUN} -eq 1 ]] && echo "[run_stream] DRY RUN — no binaries will be executed"
-echo "[run_stream] CSV output:        ${CSV_FILE}"
+echo "[run_stream] CSV pattern:       ${DATA_RAW}/stream_<abstraction>_${PLATFORM}_${TODAY}.csv"
 echo "[run_stream] ================================================================"
+
+CREATED_CSVS=()
 
 first_abs=1
 for abs in "${ABSTRACTIONS[@]}"; do
+    # ── Per-abstraction CSV file ───────────────────────────────────────────────
+    CSV_FILE="${DATA_RAW}/stream_${abs}_${PLATFORM}_${TODAY}.csv"
+    if [[ ${DRY_RUN} -eq 0 ]] && [[ ! -s "${CSV_FILE}" ]]; then
+        echo "${CSV_HEADER}" > "${CSV_FILE}"
+        echo "[run_stream] Created ${CSV_FILE}"
+    fi
+
     # Cooldown between abstractions (skip before the first one)
     if [[ ${first_abs} -eq 0 && ${COOLDOWN} -gt 0 && ${DRY_RUN} -eq 0 ]]; then
         echo ""
@@ -354,27 +360,42 @@ for abs in "${ABSTRACTIONS[@]}"; do
     for sz in "${SIZE_LIST[@]}"; do
         run_one "${abs}" "${sz}"
     done
+
+    [[ -s "${CSV_FILE}" ]] && CREATED_CSVS+=("${CSV_FILE}")
 done
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "[run_stream] ================================================================"
-if [[ ${DRY_RUN} -eq 0 ]] && [[ -s "${CSV_FILE}" ]]; then
-    local_rows=$(( $(wc -l < "${CSV_FILE}") - 1 ))
-    local_outliers="$(awk -F',' 'NR>1 && $12=="0"' "${CSV_FILE}" | wc -l)"
+if [[ ${DRY_RUN} -eq 0 ]] && [[ ${#CREATED_CSVS[@]} -gt 0 ]]; then
+    total_rows=0
+    total_outliers=0
+    for f in "${CREATED_CSVS[@]}"; do
+        rows=$(( $(wc -l < "${f}") - 1 ))
+        outliers="$(awk -F',' 'NR>1 && $12=="0"' "${f}" | wc -l)"
+        total_rows=$(( total_rows + rows ))
+        total_outliers=$(( total_outliers + outliers ))
+    done
     echo "[run_stream] Done."
-    echo "[run_stream] Total rows:    ${local_rows}"
-    echo "[run_stream] Outliers (hw_state=0): ${local_outliers}"
+    echo "[run_stream] CSV files written: ${#CREATED_CSVS[@]}"
+    for f in "${CREATED_CSVS[@]}"; do
+        rows=$(( $(wc -l < "${f}") - 1 ))
+        echo "[run_stream]   ${f##*/}  (${rows} rows)"
+    done
+    echo "[run_stream] Total rows:    ${total_rows}"
+    echo "[run_stream] Outliers (hw_state=0): ${total_outliers}"
     echo ""
     echo "[run_stream] Next steps:"
-    echo "  1. Compute PPC (exclude outliers with --drop-outliers if desired):"
+    echo "  1. Compute PPC (provide each CSV or a merged view):"
     echo "     python analysis/compute_ppc.py \\"
-    echo "       --input  ${CSV_FILE} \\"
+    echo "       --input  ${DATA_RAW}/stream_native_${PLATFORM}_${TODAY}.csv \\"
     echo "       --output data/processed/ppc_e1_${PLATFORM}.csv \\"
     echo "       --experiment E1 --problem-size large"
     echo ""
-    echo "  2. Validate schema:"
-    echo "     python scripts/parse/validate_schema.py --input ${CSV_FILE}"
+    echo "  2. Validate schema (run per file):"
+    echo "     for f in ${DATA_RAW}/stream_*_${PLATFORM}_${TODAY}.csv; do"
+    echo "       python scripts/parse/validate_schema.py --input \"\$f\""
+    echo "     done"
 else
     echo "[run_stream] Done."
 fi

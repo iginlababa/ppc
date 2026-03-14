@@ -32,6 +32,7 @@
 # ── Package environment ───────────────────────────────────────────────────────
 # Allow running both as a standalone script and via the wrapper.
 using CUDA
+using Printf
 
 # ── Constants matching stream_common.h ───────────────────────────────────────
 # Values MUST be identical across all abstraction implementations.
@@ -127,10 +128,11 @@ function dot_kernel!(partial, a, b)
 end
 
 # ── Timing helper ─────────────────────────────────────────────────────────────
-# CUDA.elapsed returns milliseconds (Float32), consistent with CUDA C's
-# cudaEventElapsedTime.  Convert to seconds for the bandwidth formula.
+# CUDA.jl ≥ 5.0: CUDA.elapsed returns seconds (Float32).
+# Note: CUDA.jl < 5 returned milliseconds — the * 1e-3 factor is intentionally
+# absent here.
 @inline function event_elapsed_s(start::CUDA.CuEvent, stop::CUDA.CuEvent)
-    return Float64(CUDA.elapsed(start, stop)) * 1e-3
+    return Float64(CUDA.elapsed(start, stop))
 end
 
 # ── Bandwidth formulae (mirror stream_common.h) ───────────────────────────────
@@ -180,8 +182,7 @@ function print_run_line(kernel::String, run_id::Int, n::Int, time_ms::Float64, b
 end
 
 function print_summary(kernel::String, s)
-    @printf("STREAM_SUMMARY kernel=%s median_bw_gbs=%.4f iqr_bw_gbs=%.4f " *
-            "min_bw_gbs=%.4f max_bw_gbs=%.4f mean_bw_gbs=%.4f outliers=%d\n",
+    @printf("STREAM_SUMMARY kernel=%s median_bw_gbs=%.4f iqr_bw_gbs=%.4f min_bw_gbs=%.4f max_bw_gbs=%.4f mean_bw_gbs=%.4f outliers=%d\n",
             kernel, s.median, s.iqr, s.min, s.max, s.mean, s.n_outliers)
     flush(stdout)
 end
@@ -339,9 +340,7 @@ function main()
     cuda_ver = CUDA.runtime_version()
     prec_str = STREAM_FLOAT == Float32 ? "float" : "double"
 
-    @printf("STREAM_META abstraction=julia backend=cuda device=\"%s\" " *
-            "cuda_runtime=%s julia=%s precision=%s " *
-            "n=%d sizeof=%d warmup=%d timed=%d all_kernels=%d\n",
+    @printf("STREAM_META abstraction=julia backend=cuda device=\"%s\" cuda_runtime=%s julia=%s precision=%s n=%d sizeof=%d warmup=%d timed=%d all_kernels=%d\n",
             dev_name, string(cuda_ver), string(VERSION), prec_str,
             n, sizeof(STREAM_FLOAT), warmup, num_times, Int(all_kernels))
     mb_per = n * sizeof(STREAM_FLOAT) / (1024.0^2)

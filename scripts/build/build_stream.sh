@@ -49,7 +49,9 @@ fi
 VENDOR="${PLATFORM%%_*}"    # e.g. "nvidia" from "nvidia_a100"
 env_script="${REPO_ROOT}/scripts/env/setup_${VENDOR}.sh"
 if [[ -f "${env_script}" ]]; then
+    _saved_platform="${PLATFORM}"
     source "${env_script}" 2>/dev/null || true
+    PLATFORM="${_saved_platform}"   # env script must not override caller's --platform
 fi
 
 # ── CUDA arch detection ───────────────────────────────────────────────────────
@@ -232,7 +234,13 @@ build_kokkos() {
         return
     fi
 
-    local kokkos_flags=(-DKokkos_ROOT="${KOKKOS_ROOT}" -DKokkos_ENABLE_CUDA=ON)
+    # Extract toolkit root from absolute compiler path; fall back when PATH-only
+    local _cuda_root=/usr/local/cuda
+    if [[ "${CUDA_COMPILER}" == *"/bin/"* ]]; then
+        _cuda_root="${CUDA_COMPILER%/bin/*}"
+    fi
+    local kokkos_flags=(-DKokkos_ROOT="${KOKKOS_ROOT}" -DKokkos_ENABLE_CUDA=ON
+                        "-DCUDAToolkit_ROOT=${_cuda_root}")
     if [[ -n "${KOKKOS_ARCH}" ]]; then
         kokkos_flags+=("-DKokkos_ARCH_${KOKKOS_ARCH}=ON")
     fi

@@ -32,6 +32,7 @@ abstractions:
   - raja
   - sycl
   - julia
+  - numba
 
 platforms:
   - nvidia_rtx5060_laptop

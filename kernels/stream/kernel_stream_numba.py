@@ -47,6 +47,32 @@ import numpy as np
 import numba
 from numba import cuda
 
+# ── PTX compatibility shim ────────────────────────────────────────────────────
+# CUDA toolkit 13.2 / NVVM 4.0.0 emits PTX `.version 9.2`, but CUDA driver
+# 590 (CUDA 13.1) only accepts PTX up to version 9.1 in cuLinkAddData.
+# Our kernels contain no PTX 9.2-specific instructions (all operations are
+# plain load/store/FMA present since PTX 7.x), so downgrading the header is safe.
+# Remove this block once the system driver is updated to ≥ 591 (CUDA 13.2).
+try:
+    from numba.cuda.cudadrv import driver as _nbdriver
+    # The concrete linker is CtypesLinker (not the abstract Linker base)
+    _CtypesLinker = _nbdriver.CtypesLinker
+    _orig_add_ptx = _CtypesLinker.add_ptx
+
+    def _compat_add_ptx(self, ptx, name="<cudapy-ptx>"):
+        if isinstance(ptx, (bytes, bytearray)):
+            ptx_str = ptx.decode("utf-8", errors="replace")
+        else:
+            ptx_str = ptx
+        ptx_str = ptx_str.replace(".version 9.2", ".version 9.1", 1)
+        return _orig_add_ptx(self, ptx_str.encode("utf-8"), name)
+
+    _CtypesLinker.add_ptx = _compat_add_ptx
+except Exception as _e:
+    import sys
+    print(f"WARNING: PTX compat shim failed to install ({_e}); PTX 9.2→9.1 "
+          "rewrite inactive — may hit cuLinkAddData version error", file=sys.stderr)
+
 # ── Precision selection ───────────────────────────────────────────────────────
 # Set STREAM_USE_FLOAT=1 to use single precision.
 # NOTE: also change the numba.float64 literals in dot_kernel below.

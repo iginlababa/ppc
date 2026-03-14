@@ -40,7 +40,7 @@
 // DeviceView: lives in the Kokkos default memory space (device memory for GPU,
 //             host memory for OpenMP/Serial).
 using DeviceView  = Kokkos::View<StreamFloat*>;
-using HostMirror  = DeviceView::HostMirror;
+using HostMirror  = DeviceView::host_mirror_type;  // Kokkos ≥ 4: use host_mirror_type
 
 // ── CLI options ───────────────────────────────────────────────────────────────
 struct Options {
