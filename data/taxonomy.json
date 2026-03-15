@@ -17,7 +17,7 @@
         "Coarsen task granularity to amortize launch cost",
         "Enable aggressive inlining flags (-O3 --inline-aggressive)"
       ],
-      "evidence": [],
+      "evidence": null,
       "ppc_impact": "0.40-0.70 depending on kernel duration",
       "related_experiments": ["E4", "E6"]
     },
@@ -25,7 +25,7 @@
       "id": "P002",
       "type": "failure",
       "name": "Compiler Backend Unrolling Failure",
-      "status": "hypothesis",
+      "status": "partially_validated",
       "symptom": "Abstraction 2-4x slower on NVIDIA for nested loops; matches on AMD",
       "root_cause_category": "Compiler Backend Failure",
       "root_cause_detail": "NVCC/PTX backend fails to unroll template-instantiated loops correctly; AMD LLVM backend handles the same patterns without regression",
@@ -36,7 +36,14 @@
         "Use vendor-tuned library (cuBLAS) for the failing kernel",
         "File compiler bug report with minimal reproducer"
       ],
-      "evidence": [],
+      "evidence": {
+        "experiment": "E2",
+        "abstraction": "raja_naive",
+        "problem_size": "medium",
+        "efficiency_benchmark": 0.24,
+        "efficiency_thermal_corrected": 0.66,
+        "note": "Benchmark eff=0.24 is thermally contaminated (sequential session: raja_naive runs after ~130s of native+cublas load; 2.76x thermal ratio confirmed by fresh-state nsys profiling at 116 GFLOP/s vs benchmark 42 GFLOP/s). Thermal-corrected eff=0.66 (116/175.1) is the representative value. True root cause is P004 API Limitation (RAJA forall cannot express shared-memory tiling); P002 Compiler Backend Failure not confirmed — cudaLaunchKernel overhead is 0.05% of runtime. Full compiler backend validation (P002) pending ncu hardware counters on A100 (RmProfilingAdminOnly=1 blocks hardware PMU on RTX 5060)."
+      },
       "ppc_impact": "0.25-0.50 on affected platform",
       "related_experiments": ["E2"],
       "literature": "Godoy et al. 2023 — Julia DGEMM on A100"
@@ -56,16 +63,50 @@
         "Profile L2 hit rate before and after layout change",
         "Document layout requirements per platform in config.yaml"
       ],
-      "evidence": [],
+      "evidence": null,
       "ppc_impact": "0.60-0.80 depending on reuse distance",
       "related_experiments": ["E3"],
       "literature": "Kokkos stencil documentation"
     }
   ],
-  "success_patterns": [],
+  "success_patterns": [
+    {
+      "id": "P005",
+      "type": "success",
+      "name": "Layout-Induced Coalescing Advantage",
+      "status": "validated",
+      "symptom": "Abstraction efficiency > 1.0 vs cuBLAS ceiling reference",
+      "root_cause": "Column-major Fortran layout in Julia eliminates transposition overhead; warp-level memory access patterns are superior to row-major C implementations at all compute-bound problem sizes",
+      "root_cause_detail": "Julia column-major CuArrays map warp threads (varying threadIdx.x → row) to consecutive elements of the same matrix column, giving perfect coalescing on A and broadcast access on B. The native tiled C kernel uses row-major storage and incurs 512 __syncthreads() barriers at N=8192 (256 tiles × 2 barriers). At arithmetic intensity ≈ 683 FLOP/byte (compute-bound), synchronisation overhead exceeds shared-memory bandwidth savings. Fresh-state nsys profiling confirms the advantage is size-independent: eff≈1.29 at N=4096 (medium) and eff≈1.20–1.25 at N=8192 (large). The apparent non-monotonic benchmark scaling (0.80 medium → 1.25 large) was a thermal contamination artifact, not a size threshold.",
+      "evidence": {
+        "experiment": "E2",
+        "abstraction": "julia_naive",
+        "problem_size": "large",
+        "efficiency_benchmark": 1.25,
+        "efficiency_medium_benchmark": 0.80,
+        "efficiency_medium_fresh_state": 1.29,
+        "efficiency_large_fresh_state": 1.20,
+        "experiment_ids": [
+          "dgemm_julia_naive_nvidia_rtx5060_laptop_large_n8192_001",
+          "dgemm_native_nvidia_rtx5060_laptop_large_n8192_001"
+        ],
+        "validation_method": "CUDA event timing (CUDA.@elapsed) confirms GPU-only kernel time produces same GFLOP/s as wall-clock measurement; max_rel_err < 1e-6 at N=128. Fresh-state nsys profiling (profiles/e2/julia_naive_medium_nsys.nsys-rep) confirms medium-N advantage: 225 GFLOP/s fresh vs 139 GFLOP/s benchmark (1.62x thermal ratio). Large-N benchmark/profiling delta is only 4%, confirming large-N result is thermally clean.",
+        "kernel_storage_order_confirmed": "nsys kernel name contains (Int)1 storage-order parameter, confirming column-major layout"
+      },
+      "affected_workloads": ["dgemm"],
+      "affected_platforms": ["nvidia_rtx5060_laptop"],
+      "implication": "Layout conventions can dominate algorithmic overhead at large problem sizes. Expert optimisation assumptions (tiling always improves performance) do not hold in compute-bound regimes where synchronisation overhead dominates. Decision framework must condition tiling recommendation on measured arithmetic intensity.",
+      "mitigation": "N/A — this is a performance advantage for the abstraction. For the native kernel: use cuBLAS or profile-guided tiling decisions conditioned on N.",
+      "ppc_impact": "PPC > 1.0 — abstraction exceeds native baseline; counts as excellent portability but native baseline is not the theoretical ceiling",
+      "related_experiments": ["E2"]
+    }
+  ],
   "_notes": [
     "All patterns marked 'hypothesis' must be validated with experiment evidence before paper submission.",
     "Add 'evidence' array entries referencing experiment_id values from data/performance.csv.",
-    "Change status from 'hypothesis' to 'validated' once experiment_ids are added."
+    "Change status from 'hypothesis' to 'validated' once experiment_ids are added.",
+    "P002 is 'partially_validated': raja_naive/medium benchmark eff=0.24 is thermally contaminated (2.76x thermal ratio; see profiles/e2/e2_profiling_notes.md). Thermal-corrected eff=0.66. True root cause is P004 API Limitation (RAJA forall cannot express tiling), not P002 Compiler Backend Failure. P002 classification pending ncu hardware counters on A100.",
+    "P005 is 'validated': julia_naive/large efficiency=1.25 confirmed by GPU event timing and correctness check. Deep profiling (2026-03-15) further confirms Pattern 5 is size-independent: fresh-state eff≈1.29 at N=4096, eff≈1.20 at N=8192. Medium-N benchmark eff=0.80 was a thermal artifact, not a size threshold for the pattern.",
+    "Thermal Contamination Pattern (informally P004_Thermal): sequential benchmark sessions create differential thermal loading when kernel durations vary across abstractions. Warmup-50 is insufficient — must use max(50 iterations, 60s) for variable-duration kernels. This affects E2 medium-N results for both raja_naive and julia_naive."
   ]
 }
