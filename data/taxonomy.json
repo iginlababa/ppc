@@ -119,6 +119,42 @@
       "related_experiments": ["E2"]
     }
   ],
+    {
+      "id": "P007",
+      "type": "failure",
+      "name": "Load Imbalance Amplification",
+      "status": "validated",
+      "symptom": "Abstraction efficiency collapses multiplicatively below what P001 Launch Overhead predicts alone — effect is multiplicative, not additive",
+      "root_cause_category": "Irregular Work Distribution",
+      "root_cause_detail": "Power-law degree distribution (Pareto γ=2.5) creates extreme row-length variance. One-thread-per-row mapping leaves most warps stalled waiting on the few long-row threads (warp divergence + thread idling). For interpreted runtimes (Julia @cuda), this compounds with P001 Launch Overhead: P001 alone predicts eff≈0.56 for julia/small, but power_law pushes it to 0.45 — a 0.11 multiplicative penalty on top of the 0.44 already from P001. The effect shrinks at larger N as tail rows dominate a smaller fraction of total runtime.",
+      "affected_workloads": ["irregular sparse graphs", "power-law networks", "SpMV with Pareto degree distributions"],
+      "affected_platforms": ["all"],
+      "mitigation": [
+        "Warp-per-row CSR (multiple threads collaborate on one row, reduces idle warps)",
+        "CSR segmented reduction (CUB DeviceSegmentedReduce) for load-balanced SpMV",
+        "Row reordering to group similar-length rows in the same warp",
+        "Use native CUDA for power-law workloads at small N; abstraction safe at large N where collapse is uniform"
+      ],
+      "evidence": {
+        "experiment": "E4",
+        "abstraction": "julia_and_kokkos",
+        "problem_size": "small",
+        "julia_power_law_small_eff": 0.45,
+        "julia_laplacian_small_eff": 0.56,
+        "kokkos_power_law_small_eff": 0.63,
+        "kokkos_laplacian_small_eff": 0.82,
+        "raja_power_law_small_eff": 0.68,
+        "raja_laplacian_small_eff": 0.93,
+        "julia_power_law_large_eff": 0.91,
+        "kokkos_power_law_large_eff": 0.81,
+        "raja_power_law_large_eff": 0.99,
+        "note": "Distinguishing feature vs P001: julia/laplacian/small eff=0.56 is P001 alone (kernel ~0.05ms). julia/power_law/small eff=0.45 — same launch overhead, but power-law nnz variance (max degree ~256, min=1) means most threads idle, amplifying the launch-overhead fraction. Multiplicative compound: P001 factor × P007 factor, not P001 + P007 additive sum. Effect size decays with N: julia/power_law/large eff=0.91 (P007 amortized, P001 also amortized). RAJA is immune at large N (eff=0.99) — direct forall without block scheduling overhead has no secondary amplification."
+      },
+      "ppc_impact": "0.40-0.70 at small N with power-law inputs; near-native at large N (P007 amortizes)",
+      "related_experiments": ["E4", "E5", "E6"],
+      "literature": "Merrill et al. 2015 (merge-based SpMV), Yang et al. 2018 (design principles for sparse GPU kernels)"
+    }
+  ],
   "e4_experiments": [
     {
       "experiment_id": "E4",

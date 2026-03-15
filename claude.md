@@ -274,7 +274,8 @@ pytest tests/unit/test_taxonomy.py -v
 - **No sudo for clock locking:** `nvidia-smi --lock-gpu-clocks` requires root. Adaptive warmup mitigates warmup phase but not thermal stepping during timed runs at N=256. Affects all large-size efficiency comparisons.
 
 ### E4 — SpMV (Sparse Matrix-Vector Multiplication)
-- **Status:** IMPLEMENTED (kernels + scripts complete) — not yet run
+- **Status:** COMPLETE — 2026-03-16
+- **Baseline note:** native SpMV baseline is naive one-thread-per-row; efficiency > 1.0 indicates abstraction scheduler outperforms naive assignment for this access pattern.
 - **Platform:** nvidia_rtx5060_laptop
 - **Abstractions:** native, kokkos, raja, julia, numba
 - **SYCL:** disabled (no SYCL compiler on platform)
