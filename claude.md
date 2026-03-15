@@ -246,3 +246,29 @@ pytest tests/unit/test_taxonomy.py -v
 
 #### Unexpected Findings
 - **julia_naive efficiency=1.25 at N=8192 is VALID** (confirmed by CUDA event timing: GPU-only time 4982–4990 ms matches wall time within 1.1%). Mechanism: Julia uses column-major storage; kernel maps `threadIdx.x → row`, so a warp of 32 threads with consecutive rows accesses the same column of A — 32 consecutive `float64`s → perfect coalescing, 1 cache-line per warp per inner-loop step. All 32 threads access the same `B[k, col]` → broadcast, zero bandwidth pressure. Zero `__syncthreads()` calls vs 512 in the native tiled kernel (256 tiles × 2 barriers at N=8192). At AI ≈ 683 FLOP/byte (compute-bound), sync overhead dominates tiling benefit. New taxonomy pattern: **Layout-Induced Coalescing Advantage** (§12.2 Pattern 5).
+
+### E3 — 3D Stencil (7-point Jacobi)
+- **Status:** COMPLETE — 2026-03-15
+- **Platform:** nvidia_rtx5060_laptop (no locked clocks — sudo unavailable; adaptive warmup CV<2%)
+- **Abstractions run:** native, kokkos, raja, julia
+- **Skipped:** sycl (no SYCL compiler on platform)
+- **UNSUPPORTED_CC120:** numba — same Numba 0.64.0/CC12.0 PTX mismatch as E2
+- **Sizes:** small (N=32³), medium (N=128³), large (N=256³)
+- **Raw CSVs:** `data/raw/stencil_*_nvidia_rtx5060_laptop_20260315.csv`
+- **Processed:** `data/processed/e3_stencil_summary.csv`
+- **Figures:** `figures/e3/fig7` through `fig12`
+- **Profiling notes:** `profiles/e3/e3_profiling_notes.md`
+- **Key findings (DRAM-bound at N=256, AI≈0.203 FLOP/byte):**
+  - native large: 435.38 GB/s (thermally throttled, CV=5.52%)
+  - kokkos large: 306.06 GB/s (eff=0.703) — thermally biased; Kokkos MDRangePolicy tiling overhead
+  - raja large: 371.66 GB/s (eff=0.854) — borderline excellent; direct block/thread mapping
+  - julia large: 598.91 GB/s (eff=1.376) — **thermal artifact**: native session ran hotter
+  - N=128 anomaly: all abstractions show >700 GB/s — L2 cache-bound (33.6 MB data at L2 boundary)
+- **Flagged for deep profiling (eff < 0.85):**
+  - julia small (eff=0.70), julia medium (eff=0.69) — launch overhead dominant
+  - kokkos small (eff=0.76), kokkos large (eff=0.70) — tiling policy + thermal bias
+- **Hypothesis verdict:** PARTIALLY confirmed. RAJA medium eff=0.99 confirms memory-bound masks abstraction overhead. Julia small/medium invalidated by P001 Launch Overhead (now validated). Thermal instability prevents clean N=256 verification.
+- **New taxonomy evidence:** P001 Launch Overhead Dominance validated (julia E3); P003 Memory Layout Mismatch NOT confirmed (RAJA vs Kokkos divergence points to tiling overhead P006 candidate)
+
+#### Platform Limitations
+- **No sudo for clock locking:** `nvidia-smi --lock-gpu-clocks` requires root. Adaptive warmup mitigates warmup phase but not thermal stepping during timed runs at N=256. Affects all large-size efficiency comparisons.

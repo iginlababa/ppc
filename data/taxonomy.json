@@ -17,9 +17,18 @@
         "Coarsen task granularity to amortize launch cost",
         "Enable aggressive inlining flags (-O3 --inline-aggressive)"
       ],
-      "evidence": null,
+      "evidence": {
+        "experiment": "E3",
+        "abstraction": "julia",
+        "problem_size": "small_and_medium",
+        "efficiency_small": 0.704,
+        "efficiency_medium": 0.691,
+        "efficiency_large": 1.376,
+        "note": "Julia small (N=32³) eff=0.70 and medium (N=128³) eff=0.69 are consistent with @cuda launch overhead (~0.2–0.5ms) dominating short kernel times (N=32 kernel time ≈0.014ms, N=128 ≈0.16ms). At large N (N=256³, kernel time ≈2.7ms) Julia large eff=1.376 — but this is a thermal artifact (native large session was hotter than Julia large session). Native CUDA overhead (no JIT, no Julia runtime) shows no corresponding degradation at small N. RAJA small eff=0.94 confirms the penalty is Julia-specific, not kernel-size-specific for all abstractions."
+      },
+      "status": "validated",
       "ppc_impact": "0.40-0.70 depending on kernel duration",
-      "related_experiments": ["E4", "E6"]
+      "related_experiments": ["E3", "E4", "E6"]
     },
     {
       "id": "P002",
@@ -63,7 +72,16 @@
         "Profile L2 hit rate before and after layout change",
         "Document layout requirements per platform in config.yaml"
       ],
-      "evidence": null,
+      "evidence": {
+        "experiment": "E3",
+        "abstraction": "kokkos",
+        "problem_size": "small_and_large",
+        "efficiency_small": 0.760,
+        "efficiency_medium": 0.910,
+        "efficiency_large": 0.703,
+        "note": "Kokkos small eff=0.76. RAJA small eff=0.94 with identical kernel logic but direct block/thread mapping — P003 layout mismatch NOT confirmed. Kokkos uses MDRangePolicy<Rank<3>> with tiling hint {2,4,32}; tiling overhead (block scheduling, boundary handling) is more likely than layout mismatch. Kokkos large eff=0.703 is thermally biased (native large session ran in hotter GPU state). P003 remains unconfirmed in E3 — see P006 (Tiling Policy Overhead) as the more likely explanation."
+      },
+      "status": "hypothesis",
       "ppc_impact": "0.60-0.80 depending on reuse distance",
       "related_experiments": ["E3"],
       "literature": "Kokkos stencil documentation"
@@ -107,6 +125,8 @@
     "Change status from 'hypothesis' to 'validated' once experiment_ids are added.",
     "P002 is 'partially_validated': raja_naive/medium benchmark eff=0.24 is thermally contaminated (2.76x thermal ratio; see profiles/e2/e2_profiling_notes.md). Thermal-corrected eff=0.66. True root cause is P004 API Limitation (RAJA forall cannot express tiling), not P002 Compiler Backend Failure. P002 classification pending ncu hardware counters on A100.",
     "P005 is 'validated': julia_naive/large efficiency=1.25 confirmed by GPU event timing and correctness check. Deep profiling (2026-03-15) further confirms Pattern 5 is size-independent: fresh-state eff≈1.29 at N=4096, eff≈1.20 at N=8192. Medium-N benchmark eff=0.80 was a thermal artifact, not a size threshold for the pattern.",
-    "Thermal Contamination Pattern (informally P004_Thermal): sequential benchmark sessions create differential thermal loading when kernel durations vary across abstractions. Warmup-50 is insufficient — must use max(50 iterations, 60s) for variable-duration kernels. This affects E2 medium-N results for both raja_naive and julia_naive."
+    "Thermal Contamination Pattern (informally P004_Thermal): sequential benchmark sessions create differential thermal loading when kernel durations vary across abstractions. Warmup-50 is insufficient — must use max(50 iterations, 60s) for variable-duration kernels. This affects E2 medium-N results for both raja_naive and julia_naive.",
+    "P006 candidate: Tiling Policy Overhead at Small Granularity — Kokkos MDRangePolicy with large tiling hints {2,4,32} shows eff=0.76 at N=32³ vs RAJA eff=0.94. At very small grids, tile boundaries dominate active work cells, and block scheduling overhead amortizes poorly. Validated direction: E3 evidence. Needs ncu occupancy analysis at N=32 to confirm.",
+    "E3 hypothesis verdict: memory-bound stencil → all abstractions near-native PARTIALLY confirmed. RAJA at medium eff=0.99 confirms hypothesis. Kokkos medium eff=0.91 supports it. Thermal instability prevents clean verification at N=256 without locked clocks. Julia medium eff=0.69 confirms P001 Launch Overhead Dominance (now validated). P003 Memory Layout Mismatch NOT confirmed in E3 — RAJA vs Kokkos divergence points to tiling overhead (P006), not layout."
   ]
 }
