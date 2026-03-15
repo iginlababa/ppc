@@ -3,7 +3,7 @@
 **Document Type:** Full Project Specification  
 **Status:** Active — Research & Implementation  
 **Version:** 1.0  
-**Last Updated:** 2026-03-12  
+**Last Updated:** 2026-03-14  
 
 ---
 
@@ -266,6 +266,28 @@ Before every experiment session, the following must be verified and logged:
 
 Apply for national lab allocations **at least 3 months before needed**.
 
+### 5.5 Secondary / Development Platforms
+
+These platforms are not part of the primary three-platform experimental matrix but are used for early development, per-abstraction validation, and methodology refinement.
+
+| Vendor | GPU | Architecture | Memory | Spec Peak BW | Role |
+|---|---|---|---|---|---|
+| NVIDIA | RTX 5060 Laptop | Blackwell (GB107) | 8 GB GDDR7 | 384 GB/s | Development; E1 methodology validation |
+
+**RTX 5060 Laptop — hardware constraints and required workarounds:**
+
+1. **Dynamic memory clock (GDDR7 boost):** The memory bus operates at two stable frequencies: 9001 MHz (~271 GB/s) and 12001 MHz (~350 GB/s). The high-performance state is reached only after ~40 iterations of sustained memory bandwidth load. This is an irreversible session-level transition — once triggered it persists until the driver is reset.
+
+2. **`--lock-gpu-clocks` does not lock memory clock:** `nvidia-smi --lock-gpu-clocks` locks the SM (compute) clock only. The memory clock must be locked separately with `nvidia-smi --lock-memory-clocks=12001,12001`; however, the driver may settle at 9001 MHz as its highest stable value. The warmup-50 protocol (§9.1) is the reliable mechanism for reaching the 12001 MHz state.
+
+3. **Warmup-50 requirement:** Use `--warmup 50` (60 total pre-timed iterations: 10 pre-warmup + 50 warmup) to guarantee the memory clock transition completes before timed runs begin. Standard warmup-10 is insufficient and produces bi-modal, thermally non-uniform data.
+
+4. **Non-deterministic boost across abstractions:** Even with controlled 5-minute GPU cooldowns between abstractions, the memory clock may non-deterministically enter the 12001 MHz boost state for some abstractions while remaining at 9001 MHz for others. This creates spurious PPC differences unrelated to abstraction overhead. **Mitigation:** Use locked-clock protocol (§5.3) and warmup-50 to force all abstractions into the same 12001 MHz state.
+
+5. **Reported theoretical peak:** 384 GB/s (GDDR7 at 12001 MHz × 128-bit bus × 2). The effective measured peak in the boosted state is ~350 GB/s (≈91% of theoretical), which is used as the roofline ceiling for this platform.
+
+6. **Results from this platform are not part of the primary publication claims** (which require the three HPC platforms in §5.1). They serve as early validation of the measurement methodology, particularly the warmup protocol and thermal regime consistency requirements.
+
 ---
 
 ## 6. Software Stack
@@ -457,7 +479,7 @@ These are the **best-case scenario** for abstractions. If an abstraction fails h
 | Primary metric | GFLOP/s |
 | Abstractions | Native ✓ \| Kokkos ✓ \| RAJA ✓ \| SYCL ✓ \| Julia ✓ |
 | Platforms | All 3 |
-| Problem sizes | Small: N=1024 \| Medium: N=4096 \| Large: N=16384 |
+| Problem sizes | Small: N=1024 \| Medium: N=4096 \| Large: N=8192 |
 | Configs | 5 × 3 × 3 = **45** |
 | Role in paper | Tests compiler optimization quality and memory layout awareness. Known Julia/NVIDIA gap (Godoy et al.) must be reproduced and explained. |
 
@@ -576,8 +598,10 @@ Every experiment follows this exact protocol. No deviations.
 
 1. **Hardware lock** — verify and log GPU clock state (§5.3)
 2. **Environment log** — record all software versions
-3. **Warm-up** — execute kernel **10 times** (never recorded)
+3. **Warm-up** — execute kernel at minimum **10 times** (never recorded); **50 times on platforms with dynamic memory clocks** (e.g., RTX 5060 Laptop — see §5.5)
    - Purpose: amortize JIT compilation (Julia), warm GPU caches, exclude runtime init overhead
+   - **Dynamic-clock rationale:** GDDR7 and similar memory subsystems make an irreversible low→high clock transition only after ~40 iterations of sustained bandwidth load. A warmup of 10 is insufficient to trigger this transition; timed runs then sample a mix of low-clock and high-clock states, producing bimodal, non-reproducible distributions. Warmup-50 (60 total pre-timed iterations: 10 pre-warmup + 50 warmup) guarantees the high-performance memory state is active for all 30 timed runs. This requirement was discovered empirically during E1 on the RTX 5060 Laptop (2026-03-14).
+   - **Default for HBM platforms** (A100, MI250X, PVC): warmup-10 is sufficient; memory clock is controlled by the lock command.
 4. **Timed runs** — execute kernel **30 times** (all recorded)
 5. **Per-run logging** — compute and store bandwidth/throughput for every individual run
 6. **Statistics** — compute median, IQR, min, max over the 30 runs
@@ -607,6 +631,8 @@ Utilization = BW_measured / BW_peak_theoretical
 This is mandatory. Raw GB/s or GFLOP/s numbers without hardware context are not publishable. Reviewers will ask: *"Did the kernel saturate the hardware?"*
 
 Native implementations must achieve ≥ 80% of theoretical peak on the Large problem size before abstraction experiments begin. If they do not, the environment setup is wrong.
+
+> **Thermal Regime Consistency Rule:** The native baseline and all abstraction measurements being compared **must be collected in the same GPU thermal and clock state**. A baseline measured at peak boost clocks compared against abstractions measured in a sustained throttle state (or vice versa) produces invalid PPC values regardless of the absolute numbers. If the platform has a dynamic clock (§5.5), enforce this by running all abstractions in the same locked-clock session with warmup-50. If abstractions are measured in different sessions, re-verify hardware state before each session and confirm the native and abstraction medians agree within 5% when run consecutively under identical conditions.
 
 ### 9.4 Performance Portability Coefficient (PPC)
 
@@ -658,7 +684,33 @@ For every flagged configuration, decompose total overhead into:
 | Memory transfer overhead | Compare total data movement: native vs. abstraction |
 | Compiler code quality | PTX/GCN inspection: unrolling, vectorization, register usage |
 
-### 9.7 Productivity Metrics
+### 9.7 Per-Run Hardware State Verification (`hw_state_verified`)
+
+`hw_state_verified` is a first-class data quality field recorded alongside every timed run. It is **not** a simple boolean for "clocks were locked before the session" — it is a per-run flag computed from the run's observed performance relative to the session median.
+
+**Detection logic:**
+
+```
+session_median = median(throughput over all timed runs for this abstraction × session)
+hw_state_verified[i] = 1   if  |throughput[i] - session_median| / session_median ≤ 0.15
+hw_state_verified[i] = 0   otherwise  (thermal outlier)
+```
+
+A run is flagged (`hw_state_verified=0`) if its throughput deviates more than 15% from the session median. This captures:
+- Transient thermal throttle events (GPU briefly drops to lower power state)
+- OS scheduling interference causing anomalously low throughput
+- Memory clock state transitions during timed runs (if warmup was insufficient)
+
+**Usage rules:**
+
+1. `hw_state_verified=0` runs **must not** be included in median/IQR statistics reported in the paper. They are kept in raw CSVs for transparency and audit.
+2. If more than 20% of runs in a session are flagged (`hw_state_verified=0`), the session is suspect. Re-examine the thermal conditions; do not proceed to analysis without understanding the cause.
+3. `hw_state_verified=1` does not guarantee perfect hardware state — it only confirms the run is consistent with the majority of the session. A session where all runs are thermally throttled will have all runs pass the filter, but at the wrong performance level. This is why the Thermal Regime Consistency Rule (§9.3) must be checked separately.
+4. In all data CSVs, the field is stored as integer (1 or 0). Downstream analysis scripts must filter on `hw_state_verified == 1` before computing statistics.
+
+**Column definition update (§10.1):** `hardware_state_verified` — integer (0 or 1) — per-run flag: 1 = this run's throughput is within 15% of the session median (clean), 0 = thermal or scheduling outlier (excluded from statistics).
+
+### 9.8 Productivity Metrics
 
 For every abstraction × kernel combination, record:
 
@@ -690,7 +742,7 @@ For every abstraction × kernel combination, record:
 | `execution_time_ms` | float | Raw kernel time for this individual run |
 | `throughput` | float | Performance in kernel-specific units (GB/s or GFLOP/s) |
 | `efficiency` | float | `throughput / native_throughput` on same platform (computed post-hoc) |
-| `hardware_state_verified` | boolean | Was clock locking confirmed before this session? |
+| `hardware_state_verified` | integer (0/1) | Per-run flag: 1 = throughput within 15% of session median (clean run); 0 = thermal or scheduling outlier, excluded from statistics. See §9.7. |
 | `compiler_version` | string | Compiler used for this build |
 | `framework_version` | string | Framework version (Kokkos 4.2, ROCm 5.7, etc.) |
 
@@ -817,6 +869,7 @@ Every root cause must be attributed to exactly one of these four categories:
 | **Runtime Coordination Overhead** | Extra synchronization, task scheduling costs, dispatch overhead | `nsys` timeline, API call analysis |
 | **Memory Model Mismatch** | Abstraction forces non-optimal layout or extra indirection | L2 cache hit rate, memory access pattern analysis |
 | **API Limitation** | Abstraction cannot express a required optimization (e.g., shared memory tiling) | Source code analysis, performance counter comparison |
+| **Thermal Regime Contamination** | Native and abstraction measurements collected under different GPU thermal/clock states, making PPC comparison invalid regardless of absolute values | Verify all abstractions show same median ± 5% when run consecutively; check `hw_state_verified` session statistics; compare measured peaks across all abstractions |
 
 ### 12.2 Known Patterns (Hypotheses to Validate)
 
@@ -842,6 +895,34 @@ Every root cause must be attributed to exactly one of these four categories:
 - Platforms: Platform-dependent (NVIDIA prefers LayoutLeft)
 - Mitigation: Explicit layout specification in abstraction API
 - Literature: Kokkos stencil; L2 hit rate drops from 75% to 45%
+
+**Pattern 4 — Thermal Regime Contamination (Measurement Artifact)**
+- Symptom: One or more abstractions show anomalously low *or* high throughput relative to the group; PPC values span a wide range (e.g., 0.49–1.00) despite architecturally identical kernels
+- Root cause: Thermal Regime Contamination — GPU measured different abstractions in different thermal states (boost vs. sustained throttle)
+- Affected: Any benchmark; most dangerous on laptop GPUs and actively cooled workstations with duty-cycle-dependent boost behavior
+- Platforms: GDDR-based laptop/workstation GPUs (RTX series); less likely on server HBM platforms
+- Detection:
+  1. All abstractions should converge to the same bandwidth ceiling if they are bandwidth-bound and the hardware state is identical
+  2. Check `hw_state_verified` session statistics — a thermally contaminated session may have a majority of runs flagged as outliers, OR (more insidiously) all flagged as "clean" at the throttled frequency
+  3. Compare session start temperatures and GPU power state from `nvidia-smi` logs
+- Mitigation:
+  1. Run all abstractions in a single locked-clock session with controlled cooldown between abstractions (≥ 5 minutes for high-TDP GPUs)
+  2. Use warmup-50 on dynamic-clock platforms (§9.1) to guarantee consistent memory clock state
+  3. Quarantine any CSV where the measured bandwidth peak is > 15% below the established platform ceiling — do not use for PPC computation
+- Evidence: E1 on RTX 5060 Laptop (2026-03-14) — original RAJA run at 172 GB/s (vs. 350 GB/s native) due to post-build thermal throttle; fresh controlled-session run yielded RAJA = 345 GB/s and PPC = 0.990 (see `data/notes/thermal_contamination_20260314.md`)
+- PPC Impact: Can produce arbitrarily bad apparent PPC (observed 0.49 for RAJA before fix) for an abstraction with true PPC ≥ 0.99
+
+**Pattern 5 — Layout-Induced Coalescing Advantage**
+- Type: success (abstraction outperforms native baseline)
+- Symptom: A higher-level abstraction reports efficiency > 1.0 relative to a hand-optimised native kernel; the native kernel uses explicit shared memory tiling while the abstraction uses a naive loop over global memory
+- Root cause: The abstraction's default memory layout (e.g., Julia column-major CuArrays) produces better warp-level memory access patterns than the expert's explicit optimisation strategy. In compute-bound regimes, synchronisation overhead from tiling (`__syncthreads()`) costs more than the global memory bandwidth saved by shared memory reuse
+- Mechanism (E2 evidence): Julia column-major layout maps warp threads to consecutive rows of a matrix column → 32 consecutive `float64`s per warp per inner-loop step (perfect coalescing). The same column index is shared by all warp threads for the second matrix → broadcast access, zero bandwidth pressure. Zero sync barriers vs 512 `__syncthreads()` calls in the native TILE=32 tiled kernel at N=8192
+- Affected workloads: Compute-bound DGEMM at large N where arithmetic intensity exceeds the roofline crossover point (AI ≫ BW_peak / FLOP_peak). Does NOT apply to memory-bound regimes where tiling eliminates reuse traffic
+- Affected platforms: NVIDIA RTX 5060 Laptop (Blackwell, sm_120); expected to generalise to other compute-bound regimes on high-AI kernels
+- Implication: Expert optimisation assumptions (tiling always helps) do not hold universally — regime (memory-bound vs compute-bound) determines whether tiling is beneficial or harmful. Decision framework must condition tiling recommendation on measured arithmetic intensity
+- Mitigation (for native kernel): Use cuBLAS or profile-guided tiling decisions conditioned on N; small N favours tiling, large compute-bound N may not
+- Evidence: `dgemm_julia_naive_nvidia_rtx5060_laptop_large_n8192_*` vs `dgemm_native_nvidia_rtx5060_laptop_large_n8192_*` — efficiency=1.2499, confirmed by CUDA event timing
+- PPC impact: PPC > 1.0 — abstraction exceeds native baseline; counts as excellent portability but requires notation that native baseline is not the theoretical ceiling
 
 ### 12.3 Success Pattern Template
 
@@ -1175,7 +1256,8 @@ Before starting any experiment group, verify:
 - [ ] All software versions recorded in experiment log
 - [ ] GPU clocks locked and verified
 - [ ] Native implementation achieves ≥ 80% of theoretical peak (Large size)
-- [ ] Warm-up protocol confirmed (10 runs before timing)
+- [ ] Warm-up protocol confirmed: 10 runs minimum; **50 runs on dynamic-clock platforms** (§5.5, §9.1)
+- [ ] Thermal regime consistency confirmed: native and all abstractions in same clock/thermal state (§9.3)
 - [ ] 30 timed runs configured
 - [ ] Output parsing script tested on sample output
 - [ ] `validate_schema.py` passes on test CSV

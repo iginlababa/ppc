@@ -1,0 +1,15 @@
+● # Build first (on the new platform)                                                                                                                    
+  ./scripts/build/build_stream.sh --platform <platform> --abstraction raja                                                                             
+  ./scripts/build/build_stream.sh --platform <platform> --abstraction sycl                                                                               
+                                                                                                                                                       
+  # Then run                                                                                                                                             
+  ./scripts/run/run_stream.sh --platform <platform> --abstraction raja --size large                                                                    
+  ./scripts/run/run_stream.sh --platform <platform> --abstraction sycl --size large
+
+  Replace <platform> with one of nvidia_a100, amd_mi250x, or intel_pvc depending on where you're running. The results will land in:
+  data/raw/stream_raja_<platform>_<date>.csv
+  data/raw/stream_sycl_<platform>_<date>.csv
+
+  If you want all abstractions in one shot on a new platform (e.g., A100 which should have no RAJA/SYCL build issues):
+  ./scripts/build/build_stream.sh --platform nvidia_a100
+  ./scripts/run/run_stream.sh --platform nvidia_a100 --size large
