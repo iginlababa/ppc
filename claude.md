@@ -272,3 +272,22 @@ pytest tests/unit/test_taxonomy.py -v
 
 #### Platform Limitations
 - **No sudo for clock locking:** `nvidia-smi --lock-gpu-clocks` requires root. Adaptive warmup mitigates warmup phase but not thermal stepping during timed runs at N=256. Affects all large-size efficiency comparisons.
+
+### E4 — SpMV (Sparse Matrix-Vector Multiplication)
+- **Status:** IMPLEMENTED (kernels + scripts complete) — not yet run
+- **Platform:** nvidia_rtx5060_laptop
+- **Abstractions:** native, kokkos, raja, julia, numba
+- **SYCL:** disabled (no SYCL compiler on platform)
+- **UNSUPPORTED_CC120:** numba — same Numba 0.64.0/CC12.0 PTX mismatch as E2/E3
+- **Matrix types:** laplacian_2d (structured), random_sparse (uniform), power_law (Pareto γ=2.5 load imbalance)
+- **Sizes:** small (N≈1024), medium (N≈8192), large (N≈32768 rows)
+- **Primary metric:** GFLOP/s = 2×nnz / time_s / 1e9
+- **AI:** ≈0.13 FLOP/byte — firmly memory-bound (ridge point ≈0.96 on RTX 5060)
+- **Kernel design:** one CUDA thread per row, no warp-per-row reductions (honest baseline)
+- **Kernel files:** `kernels/spmv/{spmv_common.h, kernel_spmv_{cuda,kokkos,raja,julia,numba}.*}`
+- **Build:** `scripts/build/build_spmv.sh` (direct nvcc / kokkos_launch_compiler / two-step RAJA)
+- **Run:** `scripts/run/run_spmv.sh` (loops abstraction × matrix_type × size)
+- **Process:** `scripts/process_e4.py` → `data/processed/e4_spmv_summary.csv`
+- **Figures:** `scripts/plot_e4.py` (fig13–fig17), `scripts/plot_e4_roofline.py` (fig18)
+- **CSV columns:** timestamp, experiment_id, kernel, abstraction, platform, matrix_type, problem_size, n_rows, nnz, run_id, execution_time_ms, throughput_gflops, hw_state_verified
+- **Expected findings:** memory-bound AI≈0.13 should mask abstraction overhead for laplacian_2d/random_sparse. power_law may reveal load imbalance effects. P001 Launch Overhead expected for julia at small/medium. Taxonomy E4 entry: `status: planned`.

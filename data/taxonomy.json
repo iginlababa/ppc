@@ -119,6 +119,18 @@
       "related_experiments": ["E2"]
     }
   ],
+  "e4_experiments": [
+    {
+      "experiment_id": "E4",
+      "kernel": "SpMV (Sparse Matrix-Vector Multiplication)",
+      "status": "planned",
+      "matrix_types": ["laplacian_2d", "random_sparse", "power_law"],
+      "problem_sizes": {"small": 1024, "medium": 8192, "large": 32768},
+      "metric": "GFLOP/s = 2*nnz / time_s / 1e9",
+      "ai_approx": 0.13,
+      "note": "AI≈0.13 FLOP/byte — firmly memory-bound. power_law matrix creates extreme load imbalance (Pareto gamma=2.5). Numba UNSUPPORTED_CC120 expected (same PTX 9.2 issue as E2/E3). No warp-per-row optimization — honest one-thread-per-row baseline. Expected hypothesis: memory-bound AI masks abstraction overhead for laplacian_2d and random_sparse; power_law may expose P001 Launch Overhead or reveal new load-imbalance pattern."
+    }
+  ],
   "_notes": [
     "All patterns marked 'hypothesis' must be validated with experiment evidence before paper submission.",
     "Add 'evidence' array entries referencing experiment_id values from data/performance.csv.",
