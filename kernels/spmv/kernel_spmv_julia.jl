@@ -12,6 +12,7 @@
 using CUDA
 using Printf: @printf
 using Statistics: median, mean, quantile, std
+using Random: shuffle!, MersenneTwister
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 const SPMV_BLOCK_SIZE   = 256
@@ -292,16 +293,16 @@ end
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 function main()
+    SPMV_N_SMALL  = 1024
+    SPMV_N_MEDIUM = 8192
+    SPMV_N_LARGE  = 32768
+
     N          = SPMV_N_LARGE
     matstr     = "laplacian_2d"
     warmup_max = SPMV_WARMUP_MAX
     reps       = SPMV_REPS_DEFAULT
     platform   = "unknown"
     do_verify  = false
-
-    SPMV_N_SMALL  = 1024
-    SPMV_N_MEDIUM = 8192
-    SPMV_N_LARGE  = 32768
 
     args = ARGS
     i = 1
@@ -329,8 +330,5 @@ function main()
 
     run_spmv(matstr, N, warmup_max, reps, platform)
 end
-
-# Imports needed at module level for shuffle!
-using Random: shuffle!, MersenneTwister
 
 main()
