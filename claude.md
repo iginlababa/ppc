@@ -273,6 +273,29 @@ pytest tests/unit/test_taxonomy.py -v
 #### Platform Limitations
 - **No sudo for clock locking:** `nvidia-smi --lock-gpu-clocks` requires root. Adaptive warmup mitigates warmup phase but not thermal stepping during timed runs at N=256. Affects all large-size efficiency comparisons.
 
+### E7 — N-Body (Lennard-Jones Molecular Dynamics)
+- **Status:** COMPLETE — 2026-03-16
+- **Platform:** nvidia_rtx5060_laptop
+- **Abstractions run:** native (notile + tile), julia (notile only)
+- **Skipped:** kokkos/raja (not installed), numba (UNSUPPORTED_CC120), sycl (NO_COMPILER)
+- **Kernel variants:** `notile` (neighbor-list, global mem), `tile` (all-pairs, shared-mem TILE_SIZE=32, P006 test)
+- **Physics:** LJ pairwise force, r_cut=2.5σ, ρ=0.8442 (FCC), one-sided, 20 FLOP/pair
+- **Sizes:** small (N=4000, M=10), medium (N=32000, M=20), large (N=256000, M=40)
+- **Raw CSVs:** `data/raw/nbody_{native,julia}_nvidia_rtx5060_laptop_20260316.csv`
+- **Processed:** `data/processed/e7_nbody_summary.csv`
+- **Figures:** `figures/e7/fig13–fig15`
+- **Key findings:**
+  - **n_nbrs = 54.0 exactly** for all sizes (perfect FCC crystal — uniform degree)
+  - **AI = 0.971 FLOP/byte** — memory-bound, below ridge (~36.8 FLOP/byte on RTX 5060)
+  - **P006 CONFIRMED**: tile speedup 4.1×/7.0×/13.6× over notile (small/medium/large). Cooperative warp loading eliminates repeated DRAM fetches; benefit grows with N as L2 cache saturation increases.
+  - **Julia notile small eff=0.31**: P001 Launch Overhead Dominance — kernel duration ~0.02ms at N=4K; @cuda dispatch overhead (~0.3ms) dominates
+  - **Julia notile medium eff=0.51**: still P001-limited at N=32K (~0.1ms kernel)
+  - **Julia notile large eff=0.95 (good tier)**: kernel duration ~3ms at N=256K — P001 overhead amortized
+  - **Julia large eff=0.95 confirms P001 crossover**: abstraction cost disappears when kernel duration ≫ dispatch latency
+  - **VRAM at N=256K: 134.4 MB used** (≈34 MB positions + 64 MB neighbor list at MAX_NBRS=512 + 12 MB forces)
+- **Design notes:** FCC positions are exactly periodic → CPU reference forces ≈ 0 (symmetry cancel); GPU uses min_image convention to match. Tile kernel uses all-pairs O(N²) algorithm, not neighbor-list; FLOPs reported accordingly.
+- **CSV columns:** timestamp, experiment_id, kernel, abstraction, platform, problem_size, n_atoms, n_nbrs_mean, n_nbrs_max, actual_flops, run_id, execution_time_ms, throughput_gflops, hw_state_verified
+
 ### E6 — BFS (Breadth-First Search)
 - **Status:** COMPLETE — 2026-03-16
 - **Platform:** nvidia_rtx5060_laptop

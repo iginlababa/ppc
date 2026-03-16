@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""
+E7 N-Body — roofline figure.
+
+fig15_e7_roofline.png — roofline model: GFLOP/s vs arithmetic intensity (FLOP/byte)
+  Plots measured (AI, GFLOP/s) for each (abstraction, kernel, size) configuration.
+  Overlays the roofline ridge for nvidia_rtx5060_laptop.
+  AI computed from n_nbrs_mean (stored in CSV) for notile configurations.
+  Tile configurations use all-pairs AI = 20*N*(N-1) / (N*(N-1)*16 + N*16) ≈ 1.25.
+
+Output: figures/e7/
+"""
+
+import os
+import sys
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import numpy as np
+import pandas as pd
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DATA_PROC = os.path.join(REPO_ROOT, "data", "processed")
+FIG_DIR   = os.path.join(REPO_ROOT, "figures", "e7")
+os.makedirs(FIG_DIR, exist_ok=True)
+
+SUMMARY_CSV = os.path.join(DATA_PROC, "e7_nbody_summary.csv")
+
+# ── RTX 5060 Laptop roofline parameters ───────────────────────────────────────
+# FP32 peak: ~12 TFLOP/s (boost); conservative 10 TFLOP/s for sustained
+# Memory bandwidth: ~272 GB/s (GDDR7 24 GB/s × channels)
+PEAK_GFLOPS   = 10_000.0   # 10 TFLOP/s = 10,000 GFLOP/s
+PEAK_BW_GBS   = 272.0      # 272 GB/s
+RIDGE_AI      = PEAK_GFLOPS / PEAK_BW_GBS  # ~36.8 FLOP/byte
+
+FLOPS_PER_PAIR = 20
+
+COLORS = {
+    ("notile", "native"): "#2b4590",
+    ("notile", "julia"):  "#d62728",
+    ("tile",   "native"): "#e87722",
+}
+MARKERS = {
+    "small":  "o",
+    "medium": "s",
+    "large":  "^",
+}
+SIZE_LABELS = {"small": "S(4K)", "medium": "M(32K)", "large": "L(256K)"}
+
+
+def compute_tile_ai(n_atoms: int) -> float:
+    """Arithmetic intensity for all-pairs tile kernel.
+    FLOPs = N*(N-1)*20.
+    Bytes = N*(N-1)*16 (pos_j reads) + N*16 (pos_i read) + N*12 (force write).
+    Simplifies to ≈ 20/16 = 1.25 FLOP/byte for large N.
+    """
+    N   = n_atoms
+    f   = N * (N - 1) * FLOPS_PER_PAIR
+    b   = N * (N - 1) * 16.0 + N * 16.0 + N * 12.0
+    return f / b if b > 0 else 0.0
+
+
+def fig15_roofline(df: pd.DataFrame):
+    # ── Build roofline curve ──────────────────────────────────────────────────
+    ai_range = np.logspace(-2, 3, 500)
+    roof = np.minimum(ai_range * PEAK_BW_GBS, PEAK_GFLOPS)
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.loglog(ai_range, roof, "k-", linewidth=1.8, label=f"Roofline (RTX 5060L)")
+    ax.axvline(RIDGE_AI, color="gray", linewidth=0.8, linestyle="--",
+               label=f"Ridge = {RIDGE_AI:.1f} FLOP/byte")
+
+    # Annotate memory- and compute-bound regions
+    ax.text(RIDGE_AI * 0.3, PEAK_GFLOPS * 0.08,
+            "memory-bound", fontsize=8, color="gray", ha="center")
+    ax.text(RIDGE_AI * 3.5, PEAK_GFLOPS * 0.5,
+            "compute-bound", fontsize=8, color="gray", ha="center")
+
+    legend_handles = []
+
+    for _, row in df.iterrows():
+        kv   = str(row["kernel"])
+        abs_ = str(row["abstraction"])
+        sz   = str(row["problem_size"])
+        key  = (kv, abs_)
+        if key not in COLORS:
+            continue
+
+        # Compute AI
+        if kv == "tile":
+            ai = compute_tile_ai(int(row["n_atoms"]))
+        else:
+            ai = float(row["ai_flop_byte"]) if not np.isnan(row["ai_flop_byte"]) else np.nan
+        if np.isnan(ai) or ai <= 0:
+            continue
+
+        gflops = float(row["median_gflops"])
+        marker = MARKERS.get(sz, "o")
+        color  = COLORS[key]
+        sc = ax.scatter(ai, gflops, c=color, marker=marker,
+                        s=80, zorder=5, edgecolors="white", linewidths=0.5)
+        ax.annotate(
+            SIZE_LABELS[sz],
+            (ai, gflops), xytext=(5, 4), textcoords="offset points",
+            fontsize=7, color=color
+        )
+
+    # Legend entries
+    for (kv, abs_), color in COLORS.items():
+        legend_handles.append(
+            mpatches.Patch(color=color, label=f"{abs_}/{kv}")
+        )
+    for sz, marker in MARKERS.items():
+        legend_handles.append(
+            plt.Line2D([0], [0], marker=marker, color="gray",
+                       linestyle="None", markersize=7,
+                       label=SIZE_LABELS[sz])
+        )
+    legend_handles.append(
+        plt.Line2D([0], [0], color="black", linewidth=1.8, label="Roofline")
+    )
+    legend_handles.append(
+        plt.Line2D([0], [0], color="gray", linestyle="--",
+                   label=f"Ridge ({RIDGE_AI:.1f})")
+    )
+
+    ax.set_xlabel("Arithmetic Intensity (FLOP/byte)", fontsize=11)
+    ax.set_ylabel("GFLOP/s (median)", fontsize=11)
+    ax.set_title(
+        "E7 N-Body — Roofline (RTX 5060 Laptop)\n"
+        "notile kernel: AI driven by neighbor density; tile: AI ≈ 1.25 (all-pairs)\n"
+        "Both kernels are memory-bound (AI << ridge ≈ 36.8 FLOP/byte)",
+        fontsize=10, fontweight="bold"
+    )
+    ax.legend(handles=legend_handles, fontsize=7.5, ncol=3,
+              loc="lower right", framealpha=0.9)
+    ax.grid(which="both", linestyle=":", alpha=0.4)
+    ax.set_xlim(0.05, 200)
+    ax.set_ylim(1, PEAK_GFLOPS * 2)
+
+    out = os.path.join(FIG_DIR, "fig15_e7_roofline.png")
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {out}")
+
+
+def main():
+    if not os.path.exists(SUMMARY_CSV):
+        print(f"[plot_e7_roofline] ERROR: {SUMMARY_CSV} not found.", file=sys.stderr)
+        print("[plot_e7_roofline] Run process_e7.py first.", file=sys.stderr)
+        sys.exit(1)
+
+    df = pd.read_csv(SUMMARY_CSV)
+    print(f"[plot_e7_roofline] Loaded {len(df)} rows")
+
+    print("[plot_e7_roofline] Generating fig15 (roofline) ...")
+    fig15_roofline(df)
+
+    print(f"[plot_e7_roofline] Figures saved to {FIG_DIR}/")
+
+
+if __name__ == "__main__":
+    main()
