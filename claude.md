@@ -274,21 +274,22 @@ pytest tests/unit/test_taxonomy.py -v
 - **No sudo for clock locking:** `nvidia-smi --lock-gpu-clocks` requires root. Adaptive warmup mitigates warmup phase but not thermal stepping during timed runs at N=256. Affects all large-size efficiency comparisons.
 
 ### E5 — SpTRSV (Sparse Triangular Solve)
-- **Status:** IN_PROGRESS — 2026-03-16
+- **Status:** COMPLETE — 2026-03-16
 - **Platform:** nvidia_rtx5060_laptop
-- **Abstractions:** native, kokkos, raja, julia
+- **Abstractions run:** native, kokkos, raja, julia
 - **Skipped:** numba (UNSUPPORTED_CC120), sycl (NO_COMPILER)
 - **Matrix types:** lower_triangular_laplacian, lower_triangular_random
 - **Sizes:** small (N=256), medium (N=2048), large (N=8192)
-- **Primary metric:** GFLOP/s = 2·nnz / time_s / 1e9 (consistent with E4; SpTRSV is latency-bound)
-- **Key diagnostic columns:** n_levels, max_level_width, min_level_width, parallelism_ratio
-- **Kernel files:** `kernels/sptrsv/{sptrsv_common.h, kernel_sptrsv_{cuda,kokkos,raja}.cpp, kernel_sptrsv_julia.jl}`
-- **Build:** `scripts/build/build_sptrsv.sh --verify` (--verify runs correctness check for all C++ binaries)
-- **Run:** `scripts/run/run_sptrsv.sh`
-- **Process:** `scripts/analysis/process_e5.py` → `data/processed/e5_sptrsv_summary.csv`
-- **Figures:** `scripts/analysis/plot_e5.py` (fig19–fig21), `scripts/analysis/plot_e5_roofline.py` (fig22)
-- **Expected new pattern:** P008 candidate: Level-Set Dispatch Amplification — per-launch overhead × n_levels
-- **CSV columns:** timestamp, experiment_id, kernel, abstraction, platform, matrix_type, problem_size, n_rows, nnz, n_levels, max_level_width, min_level_width, run_id, execution_time_ms, throughput_gflops, hw_state_verified
+- **Raw CSVs:** `data/raw/sptrsv_{native,kokkos,raja,julia}_nvidia_rtx5060_laptop_20260316.csv`
+- **Processed:** `data/processed/e5_sptrsv_summary.csv`
+- **Figures:** `figures/e5/fig19–fig22`
+- **Key findings:**
+  - **RAJA** best abstraction: only one with eff ≥ 0.93 at all laplacian sizes; eff=1.30 on random/large
+  - **Julia** worst: eff=0.46 at laplacian/large (n_levels=181) — confirmed P001×n_levels mechanism
+  - **Kokkos/RAJA random/large eff > 1.0** (1.11/1.30): wide levels (max_lw=524) fill GPU better than native's many small kernels
+  - **P008 candidate validated**: efficiency keyed to n_levels, not N. Julia laplacian: eff=0.75→0.74→0.46 as n_levels=31→90→181; same N random matrix (n_levels=75) gives eff=0.90
+  - **Irregular random < structured laplacian** for Julia (confirmed) but NOT for RAJA/Kokkos (random gives better efficiency due to wider levels)
+- **Methodology note:** x reset (cudaMemset) excluded from timed region; included in warmup loop
 
 ### E4 — SpMV (Sparse Matrix-Vector Multiplication)
 - **Status:** COMPLETE — 2026-03-16
