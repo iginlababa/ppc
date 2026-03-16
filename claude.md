@@ -273,6 +273,23 @@ pytest tests/unit/test_taxonomy.py -v
 #### Platform Limitations
 - **No sudo for clock locking:** `nvidia-smi --lock-gpu-clocks` requires root. Adaptive warmup mitigates warmup phase but not thermal stepping during timed runs at N=256. Affects all large-size efficiency comparisons.
 
+### E5 — SpTRSV (Sparse Triangular Solve)
+- **Status:** IN_PROGRESS — 2026-03-16
+- **Platform:** nvidia_rtx5060_laptop
+- **Abstractions:** native, kokkos, raja, julia
+- **Skipped:** numba (UNSUPPORTED_CC120), sycl (NO_COMPILER)
+- **Matrix types:** lower_triangular_laplacian, lower_triangular_random
+- **Sizes:** small (N=256), medium (N=2048), large (N=8192)
+- **Primary metric:** GFLOP/s = 2·nnz / time_s / 1e9 (consistent with E4; SpTRSV is latency-bound)
+- **Key diagnostic columns:** n_levels, max_level_width, min_level_width, parallelism_ratio
+- **Kernel files:** `kernels/sptrsv/{sptrsv_common.h, kernel_sptrsv_{cuda,kokkos,raja}.cpp, kernel_sptrsv_julia.jl}`
+- **Build:** `scripts/build/build_sptrsv.sh --verify` (--verify runs correctness check for all C++ binaries)
+- **Run:** `scripts/run/run_sptrsv.sh`
+- **Process:** `scripts/analysis/process_e5.py` → `data/processed/e5_sptrsv_summary.csv`
+- **Figures:** `scripts/analysis/plot_e5.py` (fig19–fig21), `scripts/analysis/plot_e5_roofline.py` (fig22)
+- **Expected new pattern:** P008 candidate: Level-Set Dispatch Amplification — per-launch overhead × n_levels
+- **CSV columns:** timestamp, experiment_id, kernel, abstraction, platform, matrix_type, problem_size, n_rows, nnz, n_levels, max_level_width, min_level_width, run_id, execution_time_ms, throughput_gflops, hw_state_verified
+
 ### E4 — SpMV (Sparse Matrix-Vector Multiplication)
 - **Status:** COMPLETE — 2026-03-16
 - **Baseline note:** native SpMV baseline is naive one-thread-per-row; efficiency > 1.0 indicates abstraction scheduler outperforms naive assignment for this access pattern.

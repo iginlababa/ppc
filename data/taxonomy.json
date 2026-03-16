@@ -167,6 +167,31 @@
       "note": "AI≈0.13 FLOP/byte — firmly memory-bound. power_law matrix creates extreme load imbalance (Pareto gamma=2.5). Numba UNSUPPORTED_CC120 expected (same PTX 9.2 issue as E2/E3). No warp-per-row optimization — honest one-thread-per-row baseline. Expected hypothesis: memory-bound AI masks abstraction overhead for laplacian_2d and random_sparse; power_law may expose P001 Launch Overhead or reveal new load-imbalance pattern."
     }
   ],
+  "e5_experiments": [
+    {
+      "experiment_id": "E5",
+      "kernel": "SpTRSV (Sparse Triangular Solve — forward substitution)",
+      "status": "pending",
+      "matrix_types": ["lower_triangular_laplacian", "lower_triangular_random"],
+      "problem_sizes": {"small": 256, "medium": 2048, "large": 8192},
+      "metric": "GFLOP/s = 2*nnz / time_s / 1e9 (consistent with E4; SpTRSV is latency-bound not bandwidth-bound)",
+      "ai_approx": 0.13,
+      "n_levels_expected": {
+        "lower_triangular_laplacian": "O(sqrt(N)) — regular BFS wavefronts from 2D grid",
+        "lower_triangular_random":    "O(N) worst case; typically O(log N) to O(N^0.5) depending on graph diameter"
+      },
+      "abstractions": ["native", "kokkos", "raja", "julia"],
+      "skipped": {
+        "numba": "UNSUPPORTED_CC120 — Numba 0.64.0 / Blackwell CC 12.0 PTX mismatch (same as E2-E4)",
+        "sycl":  "NO_COMPILER — no SYCL compiler on nvidia_rtx5060_laptop"
+      },
+      "kernel_design": "One CUDA/Kokkos/RAJA/Julia kernel launch per level; one thread per row within each level. x reset (cudaMemset) excluded from timed region. Level-set constructed CPU-side (BFS); n_levels kernel launches per solve.",
+      "primary_hypothesis": "SpTRSV efficiency gap = P001 Launch Overhead × n_levels. Each abstraction pays its per-launch overhead n_levels times per solve (not once). Julia: ~0.3ms × n_levels; Kokkos: Kokkos::fence overhead × n_levels; RAJA: RAJA::synchronize × n_levels. Compounds with P007 Load Imbalance for lower_triangular_random (irregular level widths). Expected: laplacian (regular levels) → efficiency decays predictably with n_levels; random (irregular) → additional efficiency penalty from uneven warps.",
+      "expected_new_pattern": "P008 candidate: Level-Set Dispatch Amplification — abstraction per-launch overhead multiplied by n_levels, creating O(n_levels) overhead accumulation. Distinct from P001 (single-kernel overhead) in that the penalty scales with problem structure (n_levels), not just problem size. Testable: plot efficiency vs n_levels across matrix types and sizes.",
+      "figures": ["fig19_e5_efficiency_by_matrix", "fig20_e5_level_structure", "fig21_e5_efficiency_vs_parallelism", "fig22_e5_roofline"],
+      "csv_columns": "timestamp, experiment_id, kernel, abstraction, platform, matrix_type, problem_size, n_rows, nnz, n_levels, max_level_width, min_level_width, run_id, execution_time_ms, throughput_gflops, hw_state_verified"
+    }
+  ],
   "_notes": [
     "All patterns marked 'hypothesis' must be validated with experiment evidence before paper submission.",
     "Add 'evidence' array entries referencing experiment_id values from data/performance.csv.",
