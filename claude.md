@@ -273,6 +273,23 @@ pytest tests/unit/test_taxonomy.py -v
 #### Platform Limitations
 - **No sudo for clock locking:** `nvidia-smi --lock-gpu-clocks` requires root. Adaptive warmup mitigates warmup phase but not thermal stepping during timed runs at N=256. Affects all large-size efficiency comparisons.
 
+### E6 — BFS (Breadth-First Search)
+- **Status:** IN_PROGRESS — 2026-03-16
+- **Platform:** nvidia_rtx5060_laptop
+- **Abstractions:** native (CUDA + Thrust), kokkos, raja, julia
+- **Skipped:** numba (UNSUPPORTED_CC120), sycl (NO_COMPILER)
+- **Graph types:** erdos_renyi (G(N, 10/N), irregular frontiers), 2d_grid (√N×√N 4-neighbor, regular diamond)
+- **Sizes:** small (N=1024), medium (N=16384), large (N=65536)
+- **Primary metric:** GTEPS = n_edges / time_s / 1e9 (stored as throughput_gflops for schema consistency)
+- **Kernel design:** Scatter (one thread/frontier vertex, atomicCAS) + compact (Thrust/parallel_scan/exclusive_scan/cumsum) per level
+- **Key diagnostic columns:** n_levels, max_frontier_width, min_frontier_width, peak_frontier_fraction, frontier_irregularity
+- **Build:** `scripts/build/build_bfs.sh --verify`
+- **Run:** `scripts/run/run_bfs.sh`
+- **Process:** `scripts/analysis/process_e6.py` → `data/processed/e6_bfs_summary.csv`
+- **Figures:** `scripts/analysis/plot_e6.py` (fig23–fig25), `scripts/analysis/plot_e6_roofline.py` (fig26)
+- **P006 note:** P006 (Tiling Policy Overhead) absent from BFS — no tiling, flat forall/RangePolicy only
+- **CSV columns:** timestamp, experiment_id, kernel, abstraction, platform, graph_type, problem_size, n_vertices, n_edges, n_levels, max_frontier_width, min_frontier_width, peak_frontier_fraction, run_id, execution_time_ms, throughput_gflops, hw_state_verified
+
 ### E5 — SpTRSV (Sparse Triangular Solve)
 - **Status:** COMPLETE — 2026-03-16
 - **Platform:** nvidia_rtx5060_laptop

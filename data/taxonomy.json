@@ -215,6 +215,30 @@
       }
     }
   ],
+  "e6_experiments": [
+    {
+      "experiment_id": "E6",
+      "kernel": "BFS (Breadth-First Search — level-set frontier expansion)",
+      "status": "pending",
+      "platform": "nvidia_rtx5060_laptop",
+      "graph_types": ["erdos_renyi", "2d_grid"],
+      "problem_sizes": {"small": 1024, "medium": 16384, "large": 65536},
+      "metric": "GTEPS = n_edges / time_s / 1e9 (stored as throughput_gflops for CSV schema consistency)",
+      "ai_approx": 0.125,
+      "abstractions": ["native", "kokkos", "raja", "julia"],
+      "skipped": {
+        "numba": "UNSUPPORTED_CC120 — same Numba 0.64.0/Blackwell CC 12.0 PTX mismatch as E2-E5",
+        "sycl":  "NO_COMPILER — no SYCL compiler on nvidia_rtx5060_laptop"
+      },
+      "kernel_design": "Two-phase per BFS level: scatter (one thread per frontier vertex, atomicCAS on d_distances) + compact (Thrust copy_if for native; parallel_scan for Kokkos; exclusive_scan + gather for RAJA; CUDA.cumsum for Julia). One kernel launch per phase per level. d_distances reset excluded from timed region.",
+      "primary_hypothesis": "BFS efficiency gap is driven by two independent sources: (1) P008 Level-Set Dispatch Amplification — n_levels kernel launches × per-launch overhead (same as E5 SpTRSV). (2) Frontier irregularity — irregular frontier widths create load imbalance within the scatter phase (compound with P007). Erdos-Renyi (irregular frontiers) expected to show larger abstraction gap than 2d_grid (regular diamond frontiers).",
+      "p006_note": "P006 (Tiling Policy Overhead) is NOT expected in BFS. BFS uses flat RangePolicy/forall over the frontier — no multi-dimensional tiling. P006 absence in E6 would confirm P006 is specific to tiled kernels (E2 DGEMM, E3 Stencil).",
+      "expected_new_pattern": "None beyond P007 + P008 compounds. If Kokkos/RAJA exceed native at large N with wide frontiers (similar to E5 random/large result), that would extend the wide-parallelism advantage pattern established in E5.",
+      "figures": ["fig23_e6_efficiency_by_graph", "fig24_e6_frontier_profile", "fig25_e6_efficiency_vs_irregularity", "fig26_e6_roofline"],
+      "csv_columns": "timestamp, experiment_id, kernel, abstraction, platform, graph_type, problem_size, n_vertices, n_edges, n_levels, max_frontier_width, min_frontier_width, peak_frontier_fraction, run_id, execution_time_ms, throughput_gflops, hw_state_verified",
+      "profile_csv": "data/raw/bfs_profile_{platform}_{date}.csv — per-level frontier widths (for fig24 and frontier_irregularity computation)"
+    }
+  ],
   "_notes": [
     "All patterns marked 'hypothesis' must be validated with experiment evidence before paper submission.",
     "Add 'evidence' array entries referencing experiment_id values from data/performance.csv.",
