@@ -143,7 +143,26 @@ def fig24_frontier_profile():
         print("  fig24: no profile CSVs found — skipping", file=sys.stderr)
         return
 
-    pdata = pd.concat([pd.read_csv(f) for f in profile_files], ignore_index=True)
+    # Profile CSV has unquoted frontier_widths (commas within field) — rebuild manually
+    FIXED_COLS = ["timestamp", "platform", "graph_type", "problem_size",
+                  "n_vertices", "n_levels"]
+    n_fixed = len(FIXED_COLS)
+    rows_raw = []
+    for fpath in profile_files:
+        with open(fpath) as fh:
+            for lineno, line in enumerate(fh):
+                if lineno == 0:
+                    continue
+                parts = line.rstrip("\n").split(",")
+                if len(parts) < n_fixed + 1:
+                    continue
+                rec = {FIXED_COLS[i]: parts[i] for i in range(n_fixed)}
+                rec["frontier_widths"] = ",".join(parts[n_fixed:])
+                rows_raw.append(rec)
+    if not rows_raw:
+        print("  fig24: empty profile data — skipping", file=sys.stderr)
+        return
+    pdata = pd.DataFrame(rows_raw)
     pdata = pdata.drop_duplicates(subset=["graph_type", "problem_size"])
 
     size_colors = {"small": "#2b4590", "medium": "#e87722", "large": "#2ca02c"}

@@ -82,7 +82,27 @@ def load_frontier_profiles() -> dict:
         print("  WARNING: no profile CSVs found; frontier_irregularity will be NaN",
               file=sys.stderr)
         return profiles
-    df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    # Profile CSV has an unquoted frontier_widths column containing comma-separated
+    # integers, causing pandas to see extra columns.  Read as raw text and reconstruct.
+    rows_raw = []
+    FIXED_COLS = ["timestamp", "platform", "graph_type", "problem_size",
+                  "n_vertices", "n_levels"]
+    n_fixed = len(FIXED_COLS)
+    for fpath in files:
+        with open(fpath) as fh:
+            for lineno, line in enumerate(fh):
+                line = line.rstrip("\n")
+                if lineno == 0:
+                    continue  # skip header
+                parts = line.split(",")
+                if len(parts) < n_fixed + 1:
+                    continue
+                rec = {FIXED_COLS[i]: parts[i] for i in range(n_fixed)}
+                rec["frontier_widths"] = ",".join(parts[n_fixed:])
+                rows_raw.append(rec)
+    if not rows_raw:
+        return profiles
+    df = pd.DataFrame(rows_raw)
     # Keep first profile per (graph_type, problem_size) — all reps identical
     for _, row in df.drop_duplicates(subset=["graph_type", "problem_size"]).iterrows():
         gt  = row["graph_type"]

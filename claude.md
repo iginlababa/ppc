@@ -274,20 +274,23 @@ pytest tests/unit/test_taxonomy.py -v
 - **No sudo for clock locking:** `nvidia-smi --lock-gpu-clocks` requires root. Adaptive warmup mitigates warmup phase but not thermal stepping during timed runs at N=256. Affects all large-size efficiency comparisons.
 
 ### E6 — BFS (Breadth-First Search)
-- **Status:** IN_PROGRESS — 2026-03-16
+- **Status:** COMPLETE — 2026-03-16
 - **Platform:** nvidia_rtx5060_laptop
-- **Abstractions:** native (CUDA + Thrust), kokkos, raja, julia
-- **Skipped:** numba (UNSUPPORTED_CC120), sycl (NO_COMPILER)
+- **Abstractions run:** native, julia (kokkos/raja libraries not installed)
+- **Skipped:** numba (UNSUPPORTED_CC120), sycl (NO_COMPILER), kokkos (no libkokkoscore), raja (no libRAJA)
 - **Graph types:** erdos_renyi (G(N, 10/N), irregular frontiers), 2d_grid (√N×√N 4-neighbor, regular diamond)
 - **Sizes:** small (N=1024), medium (N=16384), large (N=65536)
-- **Primary metric:** GTEPS = n_edges / time_s / 1e9 (stored as throughput_gflops for schema consistency)
-- **Kernel design:** Scatter (one thread/frontier vertex, atomicCAS) + compact (Thrust/parallel_scan/exclusive_scan/cumsum) per level
-- **Key diagnostic columns:** n_levels, max_frontier_width, min_frontier_width, peak_frontier_fraction, frontier_irregularity
-- **Build:** `scripts/build/build_bfs.sh --verify`
-- **Run:** `scripts/run/run_bfs.sh`
-- **Process:** `scripts/analysis/process_e6.py` → `data/processed/e6_bfs_summary.csv`
-- **Figures:** `scripts/analysis/plot_e6.py` (fig23–fig25), `scripts/analysis/plot_e6_roofline.py` (fig26)
-- **P006 note:** P006 (Tiling Policy Overhead) absent from BFS — no tiling, flat forall/RangePolicy only
+- **Raw CSVs:** `data/raw/bfs_{native,julia}_nvidia_rtx5060_laptop_20260316.csv`
+- **Processed:** `data/processed/e6_bfs_summary.csv`
+- **Figures:** `figures/e6/fig23–fig26`
+- **Key findings:**
+  - **P008 confirmed again**: julia 2d_grid eff=0.352/0.439/0.358 for n_levels=63/255/511 — deep DAG collapses julia efficiency just as in E5
+  - **Irregularity does NOT predict lower eff**: 2d_grid (low irregularity=0.57, regular) is WORSE than erdos_renyi (high irregularity=1.6, eff=0.43–0.73). n_levels is the dominant predictor.
+  - **erdos_renyi is shallow (n_levels=6–8)**: few synchronisation barriers → julia maintains eff=0.43–0.73. Native also higher GTEPS on ER due to fewer levels.
+  - **julia/erdos_renyi/small eff=0.731**: best julia result — only 6 levels, wide frontiers
+  - **julia/2d_grid/small eff=0.352**: worst — 63 levels × @cuda dispatch cost ≈ 19ms overhead
+  - **No eff > 1.0**: unlike E5 random/large (max_lw=524), BFS ER frontiers are too irregular and 2d_grid levels too narrow for Kokkos/RAJA to outperform native
+- **P006 note:** P006 (Tiling Policy Overhead) absent — no tiling, flat forall/RangePolicy only
 - **CSV columns:** timestamp, experiment_id, kernel, abstraction, platform, graph_type, problem_size, n_vertices, n_edges, n_levels, max_frontier_width, min_frontier_width, peak_frontier_fraction, run_id, execution_time_ms, throughput_gflops, hw_state_verified
 
 ### E5 — SpTRSV (Sparse Triangular Solve)

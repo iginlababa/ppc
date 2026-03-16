@@ -72,7 +72,8 @@ write_csv_from_output() {
                 nl=$(echo "${line}" | grep -oP 'n_levels=\K[0-9]+')
                 widths=$(echo "${line}" | grep -oP 'widths=\K[^[:space:]]+')
                 local n_v="${SIZES[${size_label}]}"
-                echo "${ts},${PLATFORM},${graph_type},${size_label},${n_v},${nl},${widths}" \
+                # Quote widths field — it contains commas, would break CSV otherwise
+                echo "${ts},${PLATFORM},${graph_type},${size_label},${n_v},${nl},\"${widths}\"" \
                     >> "${profile_file}"
                 profile_written=true
             fi
