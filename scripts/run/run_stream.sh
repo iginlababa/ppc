@@ -70,8 +70,12 @@ BINARY_NAME[julia]="stream-julia"
 BINARY_NAME[numba]="stream-numba"
 
 case "${PLATFORM}" in
-    amd_mi250x|amd_mi300x) BINARY_NAME[native]="stream-hip"  ;;
-    intel_pvc|intel_*)     BINARY_NAME[native]="stream-sycl" ;;
+    amd_mi250x|amd_mi300x)
+        BINARY_NAME[native]="stream-hip"
+        BINARY_NAME[julia]="stream-amdgpu"   # CUDA.jl → AMDGPU.jl port
+        ;;
+    intel_pvc|intel_*)
+        BINARY_NAME[native]="stream-sycl" ;;
 esac
 
 ALL_ABSTRACTIONS=(native kokkos raja sycl julia numba)
