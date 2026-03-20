@@ -18,7 +18,7 @@ E2 DESIGN DECISIONS
 
 Measurement protocols
 ─────────────────────
-NVIDIA RTX 5060 Laptop (2026-03-14)
+NVIDIA RTX 5060 (2026-03-14)
   - warmup=50; hw_state_verified is the sole clean-run gate.
   - Abstractions: native, native_cublas, raja_naive, julia_naive, julia_cublas, numba
   - numba: UNSUPPORTED_CC120 — no clean rows (PTX 9.2 rejected by driver)
@@ -49,7 +49,7 @@ PROBLEM_SIZES = {"small": 1024, "medium": 4096, "large": 8192}
 
 # ── Per-platform configuration ────────────────────────────────────────────────
 PLATFORM_CONFIGS = {
-    "nvidia_rtx5060_laptop": {
+    "nvidia_rtx5060": {
         "abstractions": [
             "native", "native_cublas",
             "kokkos", "raja_naive", "sycl",

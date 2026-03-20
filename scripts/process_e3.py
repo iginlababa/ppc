@@ -31,7 +31,7 @@ os.makedirs(DATA_PROC, exist_ok=True)
 
 # ── Platform configurations ───────────────────────────────────────────────────
 PLATFORM_CONFIGS = {
-    "nvidia_rtx5060_laptop": {
+    "nvidia_rtx5060": {
         "abstractions": ["native", "kokkos", "raja", "sycl", "julia", "numba"],
         # numba unsupported: CC 12.0 (Blackwell), PTX 9.2 rejected by driver
         "unsupported": {"numba"},
@@ -44,7 +44,6 @@ PLATFORM_CONFIGS = {
 
 # No ceiling references for E3 (unlike E2 where cuBLAS/rocBLAS were ceilings).
 CEILING_REFS: set = set()
-
 PROBLEM_SIZES = {
     "small":  32,
     "medium": 128,

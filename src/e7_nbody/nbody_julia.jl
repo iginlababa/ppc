@@ -148,7 +148,7 @@ function parse_args()
     args = Dict{String,String}(
         "size"     => "large",
         "reps"     => "30",
-        "platform" => "nvidia_rtx5060_laptop",
+        "platform" => "nvidia_rtx5060",
         "verify"   => "false",
     )
     i = 1

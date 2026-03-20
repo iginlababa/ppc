@@ -8,7 +8,7 @@ data/processed/e1_stream_summary.csv with a platform column.
 
 Measurement protocols
 ─────────────────────
-NVIDIA RTX 5060 Laptop (locked-clock session, 2026-03-14)
+NVIDIA RTX 5060 (locked-clock session, 2026-03-14)
   - SM clock locked at 2092 MHz; memory clock self-transitions 9001→12001 MHz
     after ~40 iterations of sustained bandwidth load
   - warmup=50 ensures the 12001 MHz state before any timed run
@@ -38,7 +38,7 @@ os.makedirs(DATA_PROC, exist_ok=True)
 
 # ── Per-platform configuration ────────────────────────────────────────────────
 PLATFORM_CONFIGS = {
-    "nvidia_rtx5060_laptop_locked": {
+    "nvidia_rtx5060_locked": {
         "peak_bw_gbs":         384.0,   # GDDR7 12001 MHz × 128-bit × 2
         "warmup_drop":         5,        # drop run_id ≤ 5 after hw_state filter
         "abstractions":        ["native", "kokkos", "raja", "julia", "numba"],

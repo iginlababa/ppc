@@ -1,6 +1,6 @@
 # E2 DGEMM — Deep Profiling Notes
 **Date:** 2026-03-15
-**Platform:** nvidia_rtx5060_laptop (RTX 5060 Laptop, Blackwell CC 12.0, 12001 MHz GDDR7)
+**Platform:** nvidia_rtx5060 (RTX 5060, Blackwell CC 12.0, 12001 MHz GDDR7)
 **Tool:** nsys 2024.x (`--trace cuda`); ncu blocked by `RmProfilingAdminOnly=1`
 **Flagged configs:** raja_naive/medium (eff=0.24), julia_naive/medium (eff=0.80)
 

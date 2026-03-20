@@ -25,8 +25,8 @@ import yaml
 
 # Peak hardware values from project_spec.md §5.2 and §9.2
 PEAK_BW_GBS = {
-    "nvidia_rtx5060_laptop":        288.0,
-    "nvidia_rtx5060_laptop_locked": 384.0,   # GDDR7 12001 MHz × 128-bit × 2
+    "nvidia_rtx5060":        288.0,
+    "nvidia_rtx5060_locked": 384.0,   # GDDR7 12001 MHz × 128-bit × 2
     "nvidia_a100":                  2039.0,
     "amd_mi250x":                   3277.0,
     "amd_mi300x":                   5300.0,   # HBM3 theoretical peak
@@ -34,8 +34,8 @@ PEAK_BW_GBS = {
 }
 
 PEAK_FLOPS_GFLOPS = {
-    "nvidia_rtx5060_laptop":        1700.0,   # FP64 ~1.7 TFLOP/s (RTX 5060 Laptop)
-    "nvidia_rtx5060_laptop_locked": 1700.0,
+    "nvidia_rtx5060":        1700.0,   # FP64 ~1.7 TFLOP/s (RTX 5060)
+    "nvidia_rtx5060_locked": 1700.0,
     "nvidia_a100":                  19500.0,
     "amd_mi250x":                   47900.0,
     "amd_mi300x":                   163400.0, # FP64 ~163.4 TFLOP/s (MI300X)

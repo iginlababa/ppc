@@ -27,7 +27,7 @@ FIG_DIR   = os.path.join(REPO_ROOT, "figures", "e6")
 os.makedirs(FIG_DIR, exist_ok=True)
 
 SUMMARY_CSV = os.path.join(DATA_PROC, "e6_bfs_summary.csv")
-PLATFORM    = "nvidia_rtx5060_laptop"
+PLATFORM    = "nvidia_rtx5060"
 
 SIZE_ORDER      = ["small", "medium", "large"]
 SIZE_LABELS     = ["small\n(N=1K)", "medium\n(N=16K)", "large\n(N=64K)"]

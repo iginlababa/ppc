@@ -16,10 +16,10 @@ REPO_ROOT = Path(__file__).parent.parent.resolve()
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--platform",
-        default="nvidia_rtx5060_laptop",
-        help="Target hardware platform (default: nvidia_rtx5060_laptop). "
+        default="nvidia_rtx5060",
+        help="Target hardware platform (default: nvidia_rtx5060). "
              "Determines the build sub-directory and binary suffix. "
-             "Examples: nvidia_rtx5060_laptop, nvidia_a100, amd_mi250x, intel_pvc",
+             "Examples: nvidia_rtx5060, nvidia_a100, amd_mi250x, intel_pvc",
     )
     parser.addoption(
         "--build-dir",

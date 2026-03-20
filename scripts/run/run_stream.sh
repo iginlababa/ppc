@@ -16,10 +16,10 @@
 #   results/<platform>/stream/<abs>_<sz>.out    — raw binary stdout (provenance)
 #
 # Usage:
-#   ./scripts/run/run_stream.sh --platform nvidia_rtx5060_laptop
-#   ./scripts/run/run_stream.sh --platform nvidia_rtx5060_laptop \
+#   ./scripts/run/run_stream.sh --platform nvidia_rtx5060
+#   ./scripts/run/run_stream.sh --platform nvidia_rtx5060 \
 #       --abstraction native --size large
-#   ./scripts/run/run_stream.sh --platform nvidia_rtx5060_laptop \
+#   ./scripts/run/run_stream.sh --platform nvidia_rtx5060 \
 #       --cooldown 0 --dry-run
 
 set -euo pipefail
@@ -31,7 +31,7 @@ RESULTS_BASE="${REPO_ROOT}/results"
 DATA_RAW="${REPO_ROOT}/data/raw"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-PLATFORM="nvidia_rtx5060_laptop"
+PLATFORM="nvidia_rtx5060"
 ABSTRACTION="all"
 SIZE="all"
 REPS=30
@@ -115,7 +115,7 @@ find_binary() {
     local abs="$1"
     local bin_name="${BINARY_NAME[$abs]:-stream-${abs}}"
     local prefix="${bin_name#stream-}"
-    # Try exact platform match first (e.g. raja_nvidia_rtx5060_laptop)
+    # Try exact platform match first (e.g. raja_nvidia_rtx5060)
     local p="${BUILD_BASE}/${prefix}_${PLATFORM}/${bin_name}"
     [[ -x "${p}" ]] && { echo "${p}"; return 0; }
     # Try base platform with known run-tags stripped (e.g. _locked, _v2)

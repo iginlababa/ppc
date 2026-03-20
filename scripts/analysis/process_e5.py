@@ -41,7 +41,7 @@ DATA_PROC = os.path.join(REPO_ROOT, "data", "processed")
 os.makedirs(DATA_PROC, exist_ok=True)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-PLATFORM = "nvidia_rtx5060_laptop"
+PLATFORM = "nvidia_rtx5060"
 
 ALL_ABSTRACTIONS = ["native", "kokkos", "raja", "julia"]
 # numba: UNSUPPORTED_CC120; sycl: NO_COMPILER

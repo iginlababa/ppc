@@ -33,7 +33,7 @@ DATA_RAW  = os.path.join(REPO_ROOT, "data", "raw")
 DATA_PROC = os.path.join(REPO_ROOT, "data", "processed")
 os.makedirs(DATA_PROC, exist_ok=True)
 
-PLATFORM = "nvidia_rtx5060_laptop"
+PLATFORM = "nvidia_rtx5060"
 ALL_ABSTRACTIONS = ["native", "julia"]
 PROBLEM_SIZES    = {"small": 4000, "medium": 32000, "large": 256000}
 KERNEL_VARIANTS  = ["notile", "tile"]

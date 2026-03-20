@@ -1,5 +1,5 @@
 # E3 3D Stencil — Profiling Notes
-Platform: NVIDIA RTX 5060 Laptop (Blackwell, CC 12.0)
+Platform: NVIDIA RTX 5060 (Blackwell, CC 12.0)
 Date: 2026-03-15
 
 ## Summary
@@ -65,10 +65,10 @@ CUDA API call overhead vs kernel execution time. Compare kernel time distributio
 
 ```bash
 nsys profile --trace=cuda,nvtx -o profiles/e3/julia_small \
-  build/stencil/julia_nvidia_rtx5060_laptop/stencil-julia --n 32 --warmup 5 --reps 5 --platform nvidia_rtx5060_laptop
+  build/stencil/julia_nvidia_rtx5060/stencil-julia --n 32 --warmup 5 --reps 5 --platform nvidia_rtx5060
 
 nsys profile --trace=cuda,nvtx -o profiles/e3/julia_medium \
-  build/stencil/julia_nvidia_rtx5060_laptop/stencil-julia --n 128 --warmup 5 --reps 5 --platform nvidia_rtx5060_laptop
+  build/stencil/julia_nvidia_rtx5060/stencil-julia --n 128 --warmup 5 --reps 5 --platform nvidia_rtx5060
 ```
 
 ---
@@ -101,7 +101,7 @@ Numba 0.64.0 (CUDA toolkit version in conda env) generates PTX 9.2 for Blackwell
 but the NVIDIA driver on this system only accepts up to PTX 9.1. This is a platform compatibility
 limitation, not a code defect.
 
-**Evidence**: All 3 sizes produced 0 data rows in `stencil_numba_nvidia_rtx5060_laptop_20260315.csv`.
+**Evidence**: All 3 sizes produced 0 data rows in `stencil_numba_nvidia_rtx5060_20260315.csv`.
 The binary detects PTX_VERSION_MISMATCH and exits cleanly with the UNSUPPORTED_CC120 message.
 
 **Resolution**: Upgrade to Numba ≥ 0.65 when it supports PTX 9.2 fully, or run on an older
@@ -122,7 +122,7 @@ Will evaluate on Intel PVC (E-series experiments) or via CUDA SYCL backend (Adap
 native medium: 878.31 GB/s, kokkos medium: 799.16 GB/s — both exceed DRAM peak (270 GB/s).
 
 **Explanation**: The N=128 grid occupies 128³ × 8 × 2 buffers = 33.6 MB. This is right at the
-RTX 5060 Laptop L2 cache boundary (~32–48 MB). With adaptive warmup loading the data into L2
+RTX 5060 L2 cache boundary (~32–48 MB). With adaptive warmup loading the data into L2
 (152 iterations for native N=32 vs 11 for N=128), the N=128 data fits partially in the L2
 cache during measurement, giving apparent BW >> DRAM. This is L2 cache-served bandwidth, not DRAM.
 

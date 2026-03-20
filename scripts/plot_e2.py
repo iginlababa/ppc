@@ -89,6 +89,7 @@ def load() -> tuple[pd.DataFrame, pd.DataFrame]:
     df = pd.read_csv(path)
     df["is_ceiling_ref"] = df["is_ceiling_ref"].astype(str).str.lower() == "true"
     df["flag_deep_profiling"] = df["flag_deep_profiling"].astype(str).str.lower() == "true"
+    df = df[df["platform"] == "nvidia_rtx5060"].copy()
     perf = df[~df["is_ceiling_ref"]].copy()
     ceil = df[df["is_ceiling_ref"]].copy()
     return perf, ceil
@@ -259,7 +260,7 @@ def fig3_crossover(perf: pd.DataFrame) -> str:
 
     for ab in ABSTRACTIONS:
         sub = perf[perf["abstraction"] == ab].set_index("n_matrix")
-        ys = [sub.loc[n, "median_gflops"] if n in sub.index else np.nan
+        ys = [float(sub.loc[n, "median_gflops"]) if n in sub.index else np.nan
               for n in size_x]
         ax.plot(range(len(size_x)), ys,
                 color=COLORS[ab], marker="o", markersize=5,

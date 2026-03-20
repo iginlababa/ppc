@@ -4,7 +4,7 @@ E5 SpTRSV — roofline plot.
 
 fig22_e5_roofline.png — roofline model with all (abstraction, matrix_type, size) overlaid.
 
-Hardware: NVIDIA RTX 5060 Laptop
+Hardware: NVIDIA RTX 5060
   - Peak FP64: 261 GFLOP/s (Blackwell, FP64 = FP32/64 ≈ 16.7e3/64)
   - Peak BW:   272 GB/s (GDDR7 128-bit; measured from E1 STREAM ~270 GB/s)
   - Roofline ridgeline: AI_ridge = 261/272 ≈ 0.96 FLOP/byte
@@ -48,7 +48,7 @@ os.makedirs(FIG_DIR, exist_ok=True)
 
 SUMMARY_CSV = os.path.join(DATA_PROC, "e5_sptrsv_summary.csv")
 
-# ── Hardware parameters (RTX 5060 Laptop) ─────────────────────────────────────
+# ── Hardware parameters (RTX 5060) ─────────────────────────────────────
 PEAK_GFLOPS = 261.0    # FP64 GFLOP/s
 PEAK_GBS    = 272.0    # GB/s (from E1 STREAM)
 AI_RIDGE    = PEAK_GFLOPS / PEAK_GBS  # ≈ 0.96 FLOP/byte
@@ -147,7 +147,7 @@ def main():
         "Use fig21 (efficiency vs parallelism_ratio) for the correct diagnostic."
     )
     ax.set_title(
-        f"E5 SpTRSV — Roofline (RTX 5060 Laptop, FP64)\n{subtitle}",
+        f"E5 SpTRSV — Roofline (RTX 5060, FP64)\n{subtitle}",
         fontsize=8, fontweight="bold", loc="left"
     )
 

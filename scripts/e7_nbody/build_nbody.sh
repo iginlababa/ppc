@@ -11,7 +11,7 @@
 # [B4] nbody-julia:  bash wrapper script pointing at nbody_julia.jl.
 #
 # Usage:
-#   ./scripts/e7_nbody/build_nbody.sh [--platform nvidia_rtx5060_laptop] [--clean]
+#   ./scripts/e7_nbody/build_nbody.sh [--platform nvidia_rtx5060] [--clean]
 #
 # Environment overrides:
 #   KOKKOS_INSTALL_PREFIX  — override Kokkos install directory
@@ -25,7 +25,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SRC_DIR="${REPO_ROOT}/src/e7_nbody"
 BUILD_BASE="${REPO_ROOT}/build/e7_nbody"
 
-PLATFORM="nvidia_rtx5060_laptop"
+PLATFORM="nvidia_rtx5060"
 CLEAN=false
 
 while [[ $# -gt 0 ]]; do
@@ -36,24 +36,49 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ── CUDA architecture detection ───────────────────────────────────────────────
-if [[ -n "${CUDA_ARCH:-}" ]]; then
-    ARCH="${CUDA_ARCH}"
-elif [[ "${PLATFORM}" == *"rtx5060"* ]] || [[ "${PLATFORM}" == *"blackwell"* ]]; then
-    ARCH="sm_120"
-elif [[ "${PLATFORM}" == *"a100"* ]]; then
-    ARCH="sm_80"
-elif [[ "${PLATFORM}" == *"v100"* ]]; then
-    ARCH="sm_70"
-elif [[ "${PLATFORM}" == *"a40"* ]]; then
-    ARCH="sm_86"
+# ── Platform type detection ───────────────────────────────────────────────────
+if [[ "${PLATFORM}" == amd_* ]]; then
+    IS_AMD=true
+    # HIP arch for AMD platforms
+    if [[ -n "${HIP_ARCH:-}" ]]; then
+        HIP_ARCH_VAL="${HIP_ARCH}"
+    elif [[ "${PLATFORM}" == *"mi300x"* ]]; then
+        HIP_ARCH_VAL="gfx942"
+    elif [[ "${PLATFORM}" == *"mi250x"* ]]; then
+        HIP_ARCH_VAL="gfx90a"
+    elif [[ "${PLATFORM}" == *"mi100"* ]]; then
+        HIP_ARCH_VAL="gfx908"
+    else
+        HIP_ARCH_VAL="gfx942"
+    fi
+    HIPCC_BIN="${ROCM_HOME:-/opt/rocm}/bin/hipcc"
+    ARCH=""
 else
-    ARCH="sm_80"
+    IS_AMD=false
+    # CUDA architecture detection
+    if [[ -n "${CUDA_ARCH:-}" ]]; then
+        ARCH="${CUDA_ARCH}"
+    elif [[ "${PLATFORM}" == *"rtx5060"* ]] || [[ "${PLATFORM}" == *"blackwell"* ]]; then
+        ARCH="sm_120"
+    elif [[ "${PLATFORM}" == *"a100"* ]]; then
+        ARCH="sm_80"
+    elif [[ "${PLATFORM}" == *"v100"* ]]; then
+        ARCH="sm_70"
+    elif [[ "${PLATFORM}" == *"a40"* ]]; then
+        ARCH="sm_86"
+    else
+        ARCH="sm_80"
+    fi
+    HIP_ARCH_VAL=""
 fi
 
 echo "[build_nbody] =============================================================="
 echo "[build_nbody] Platform: ${PLATFORM}"
+if [[ "${IS_AMD}" == "true" ]]; then
+echo "[build_nbody] HIP arch:  ${HIP_ARCH_VAL}"
+else
 echo "[build_nbody] CUDA arch: ${ARCH}"
+fi
 echo "[build_nbody] Src dir:   ${SRC_DIR}"
 echo "[build_nbody] Build base: ${BUILD_BASE}"
 echo "[build_nbody] =============================================================="
@@ -104,25 +129,51 @@ fi
 
 echo ""
 
-# ── nbody-native ──────────────────────────────────────────────────────────────
+# ── nbody-hip (AMD only) ──────────────────────────────────────────────────────
+BUILD_HIP="${BUILD_BASE}/hip_${PLATFORM}"
+if [[ "${IS_AMD}" == "true" ]]; then
+    [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_HIP}"
+    mkdir -p "${BUILD_HIP}"
+
+    if ! command -v "${HIPCC_BIN}" &>/dev/null; then
+        echo "[build_nbody] WARNING: hipcc not found at ${HIPCC_BIN} — SKIP nbody-hip"
+        _HIP_OK=false
+    else
+        echo "[build_nbody] Building nbody-hip (notile kernel, HIP/ROCm) ..."
+        "${HIPCC_BIN}" -O3 --offload-arch="${HIP_ARCH_VAL}" \
+            -DNBODY_USE_HIP \
+            -I "${SRC_DIR}" \
+            "${SRC_DIR}/nbody_hip.cpp" \
+            -o "${BUILD_HIP}/nbody-hip"
+        echo "[build_nbody]   → ${BUILD_HIP}/nbody-hip"
+        _HIP_OK=true
+    fi
+fi
+
+# ── nbody-native (NVIDIA only) ────────────────────────────────────────────────
 BUILD_NATIVE="${BUILD_BASE}/native_${PLATFORM}"
-[[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_NATIVE}"
-mkdir -p "${BUILD_NATIVE}"
+if [[ "${IS_AMD}" == "false" ]]; then
+    [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_NATIVE}"
+    mkdir -p "${BUILD_NATIVE}"
 
-echo "[build_nbody] Building nbody-native (notile + tile kernels) ..."
-nvcc -O3 -arch="${ARCH}" \
-    --use_fast_math --generate-line-info \
-    --expt-extended-lambda --expt-relaxed-constexpr \
-    -Xcompiler=-Wall,-Wextra \
-    -I "${SRC_DIR}" \
-    "${SRC_DIR}/nbody_native.cu" \
-    -lcudart \
-    -o "${BUILD_NATIVE}/nbody-native"
-echo "[build_nbody]   → ${BUILD_NATIVE}/nbody-native"
+    echo "[build_nbody] Building nbody-native (notile + tile kernels) ..."
+    nvcc -O3 -arch="${ARCH}" \
+        --use_fast_math --generate-line-info \
+        --expt-extended-lambda --expt-relaxed-constexpr \
+        -Xcompiler=-Wall,-Wextra \
+        -I "${SRC_DIR}" \
+        "${SRC_DIR}/nbody_native.cu" \
+        -lcudart \
+        -o "${BUILD_NATIVE}/nbody-native"
+    echo "[build_nbody]   → ${BUILD_NATIVE}/nbody-native"
+fi
 
-# ── nbody-kokkos ──────────────────────────────────────────────────────────────
+# ── nbody-kokkos (NVIDIA only for now) ───────────────────────────────────────
 BUILD_KOKKOS="${BUILD_BASE}/kokkos_${PLATFORM}"
-if [[ "${_KOKKOS_OK}" == "true" ]]; then
+if [[ "${IS_AMD}" == "true" ]]; then
+    echo "[build_nbody] SKIP nbody-kokkos (Kokkos HIP backend not yet wired for E7)"
+    _KOKKOS_OK=false
+elif [[ "${_KOKKOS_OK}" == "true" ]]; then
     [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_KOKKOS}"
     mkdir -p "${BUILD_KOKKOS}"
 
@@ -152,9 +203,12 @@ else
     echo "[build_nbody] SKIP nbody-kokkos (Kokkos not found)"
 fi
 
-# ── nbody-raja ────────────────────────────────────────────────────────────────
+# ── nbody-raja (NVIDIA only for now) ─────────────────────────────────────────
 BUILD_RAJA="${BUILD_BASE}/raja_${PLATFORM}"
-if [[ "${_RAJA_OK}" == "true" ]]; then
+if [[ "${IS_AMD}" == "true" ]]; then
+    echo "[build_nbody] SKIP nbody-raja (RAJA HIP backend not yet wired for E7)"
+    _RAJA_OK=false
+elif [[ "${_RAJA_OK}" == "true" ]]; then
     [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_RAJA}"
     mkdir -p "${BUILD_RAJA}"
 
@@ -203,7 +257,8 @@ echo "[build_nbody]   → ${JULIA_WRAP} (Julia wrapper)"
 echo ""
 echo "[build_nbody] Build complete."
 echo "[build_nbody] Binaries:"
-echo "[build_nbody]   native: ${BUILD_NATIVE}/nbody-native"
+[[ "${IS_AMD}" == "true" ]]  && [[ "${_HIP_OK:-false}" == "true" ]] && echo "[build_nbody]   hip:    ${BUILD_HIP}/nbody-hip"
+[[ "${IS_AMD}" == "false" ]] && echo "[build_nbody]   native: ${BUILD_NATIVE}/nbody-native"
 [[ "${_KOKKOS_OK}" == "true" ]] && echo "[build_nbody]   kokkos: ${BUILD_KOKKOS}/nbody-kokkos"
 [[ "${_RAJA_OK}"   == "true" ]] && echo "[build_nbody]   raja:   ${BUILD_RAJA}/nbody-raja"
 echo "[build_nbody]   julia:  ${JULIA_WRAP}"

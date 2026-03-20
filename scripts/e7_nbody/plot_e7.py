@@ -103,7 +103,7 @@ def fig13_efficiency(df: pd.DataFrame):
     ax.set_ylabel("Efficiency vs native_notile", fontsize=11)
     ax.set_ylim(0, 1.35)
     ax.set_title(
-        "E7 N-Body — Abstraction Efficiency (RTX 5060 Laptop)\n"
+        "E7 N-Body — Abstraction Efficiency (RTX 5060)\n"
         "Efficiency = median GFLOP/s / native_notile GFLOP/s",
         fontsize=10, fontweight="bold")
     ax.legend(fontsize=8, ncol=3, loc="upper right")
@@ -144,7 +144,7 @@ def fig14_gflops(df: pd.DataFrame):
     ax.set_xticklabels([ABS_LABELS.get(a, a) for a in pivot.index], fontsize=9)
     ax.set_ylabel("Median GFLOP/s", fontsize=11)
     ax.set_title(
-        "E7 N-Body — Absolute Throughput (RTX 5060 Laptop)\n"
+        "E7 N-Body — Absolute Throughput (RTX 5060)\n"
         "Error bars = IQR/2 over 30 timed reps",
         fontsize=10, fontweight="bold")
     ax.legend(fontsize=8, loc="upper right")

@@ -32,7 +32,7 @@ REQUIRED_COLUMNS = [
 
 VALID_KERNELS      = {"stream", "dgemm", "stencil", "spmv", "sptrsv", "bfs", "nbody"}
 VALID_ABSTRACTIONS = {"native", "kokkos", "raja", "sycl", "julia", "numba"}
-VALID_PLATFORMS    = {"nvidia_a100", "nvidia_rtx5060_laptop", "amd_mi250x", "intel_pvc"}
+VALID_PLATFORMS    = {"nvidia_a100", "nvidia_rtx5060", "amd_mi250x", "intel_pvc"}
 VALID_SIZES        = {"small", "medium", "large"}
 
 

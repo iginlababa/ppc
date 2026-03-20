@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-KERNEL=""; ABSTRACTION=""; SIZE="large"; PLATFORM="nvidia_rtx5060_laptop"
+KERNEL=""; ABSTRACTION=""; SIZE="large"; PLATFORM="nvidia_rtx5060"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

@@ -327,7 +327,7 @@ struct BfsConfig {
     int n                   = BFS_N_SMALL;
     int reps                = 30;
     bool verify             = false;
-    std::string platform    = "nvidia_rtx5060_laptop";
+    std::string platform    = "nvidia_rtx5060";
 };
 
 inline BfsConfig bfs_parse_args(int argc, char** argv) {

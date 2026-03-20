@@ -3,7 +3,7 @@
 E2 DGEMM — multi-platform efficiency figure (fig7).
 
 Two-panel grouped-bar chart:
-  Left  panel: NVIDIA RTX 5060 Laptop
+  Left  panel: NVIDIA RTX 5060
   Right panel: AMD MI300X
 
 Y-axis: efficiency η = median_gflops / native_gflops
@@ -15,7 +15,7 @@ Key findings annotated:
   • RAJA consistency: poor on both platforms (~0.19–0.48)
   • Kokkos/SYCL: N/A NVIDIA; near-native on AMD (η≈0.96–0.97)
 
-Output: figures/e2/fig_e2_efficiency_multiplatform.pdf
+Output: figures/e2/fig_e2_efficiency_multiplatform.png
 """
 
 import os
@@ -68,9 +68,9 @@ ABS_LABELS   = {
 # Abstractions absent on NVIDIA → show N/A markers
 NVIDIA_NA = {"kokkos", "sycl"}
 
-PLATFORMS = ["nvidia_rtx5060_laptop", "amd_mi300x"]
+PLATFORMS = ["nvidia_rtx5060", "amd_mi300x"]
 PANEL_TITLES = {
-    "nvidia_rtx5060_laptop": "NVIDIA RTX 5060 Laptop",
+    "nvidia_rtx5060": "NVIDIA RTX 5060",
     "amd_mi300x":            "AMD MI300X",
 }
 
@@ -103,7 +103,7 @@ def draw_panel(ax: plt.Axes, perf: pd.DataFrame, platform: str, show_legend: boo
             off = offsets[ai]
 
             # N/A on NVIDIA
-            if platform in ("nvidia_rtx5060_laptop",) and ab in NVIDIA_NA:
+            if platform in ("nvidia_rtx5060",) and ab in NVIDIA_NA:
                 ax.text(off, 0.03, "N/A", ha="center", va="bottom",
                         fontsize=6, color="#AAAAAA", rotation=90)
                 continue
@@ -147,7 +147,7 @@ def draw_panel(ax: plt.Axes, perf: pd.DataFrame, platform: str, show_legend: boo
     ax.set_xlim(x[0] - width * 2, x[-1] + width * 2)
 
     # Annotate key findings
-    if platform == "nvidia_rtx5060_laptop":
+    if platform == "nvidia_rtx5060":
         # Julia/large: Pattern 5 gold annotation
         ai  = ABSTRACTIONS.index("julia_naive")
         si  = SIZES.index("large")
@@ -208,7 +208,7 @@ def main():
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=False)
 
-    draw_panel(axes[0], perf, "nvidia_rtx5060_laptop", show_legend=True)
+    draw_panel(axes[0], perf, "nvidia_rtx5060", show_legend=True)
     draw_panel(axes[1], perf, "amd_mi300x",            show_legend=False)
 
     # Shared legend at bottom
@@ -232,11 +232,11 @@ def main():
 
     fig.suptitle(
         "E2 DGEMM — Efficiency η by Platform, Abstraction, and Problem Size\n"
-        "Left: NVIDIA RTX 5060 Laptop  |  Right: AMD MI300X",
+        "Left: NVIDIA RTX 5060  |  Right: AMD MI300X",
         fontsize=10, y=1.01)
 
     fig.tight_layout()
-    out = os.path.join(FIGURES, "fig_e2_efficiency_multiplatform.pdf")
+    out = os.path.join(FIGURES, "fig_e2_efficiency_multiplatform.png")
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     kb = os.path.getsize(out) / 1024

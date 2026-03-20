@@ -63,7 +63,7 @@ def fig13_efficiency_bars(df: pd.DataFrame):
             if row.empty:
                 vals.append(0.0); errs.append(0.0)
                 continue
-            eff = float(row["efficiency"].iloc[0])
+            eff = float(row["efficiency_vs_native_notile"].iloc[0])
             # Error bar: IQR / native_median
             native = df[(df["kernel"] == "notile") & (df["abstraction"] == "native") &
                         (df["problem_size"] == sz)]
@@ -93,7 +93,7 @@ def fig13_efficiency_bars(df: pd.DataFrame):
     ax.set_ylabel("Efficiency vs native_notile", fontsize=10)
     max_val = max((r for vals_list in [
         [df[(df["kernel"]==kv) & (df["abstraction"]==a) &
-            (df["problem_size"]==sz)]["efficiency"].iloc[0]
+            (df["problem_size"]==sz)]["efficiency_vs_native_notile"].iloc[0]
          for sz in SIZE_ORDER
          if not df[(df["kernel"]==kv) & (df["abstraction"]==a) &
                    (df["problem_size"]==sz)].empty]

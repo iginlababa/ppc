@@ -211,7 +211,7 @@ inline NBodyConfig nbody_parse_args(int argc, char** argv) {
     cfg.box_len    = 10.0f * FCC_A;
     cfg.reps       = 30;
     cfg.verify     = false;
-    cfg.platform   = "nvidia_rtx5060_laptop";
+    cfg.platform   = "nvidia_rtx5060";
     cfg.kernel     = "notile";
     cfg.size_label = "small";
 

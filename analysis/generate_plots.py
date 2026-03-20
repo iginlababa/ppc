@@ -52,7 +52,7 @@ ABSTRACTION_COLORS = {
 }
 
 PLATFORM_MARKERS = {
-    "nvidia_rtx5060_laptop": "D",
+    "nvidia_rtx5060": "D",
     "nvidia_a100":           "o",
     "amd_mi250x":            "s",
     "intel_pvc":             "^",

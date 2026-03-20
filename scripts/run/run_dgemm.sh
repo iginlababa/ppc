@@ -10,8 +10,8 @@
 #              problem_size,run_id,execution_time_ms,throughput_gflops,hw_state_verified
 #
 # Usage:
-#   ./scripts/run/run_dgemm.sh --platform nvidia_rtx5060_laptop_locked
-#   ./scripts/run/run_dgemm.sh --platform nvidia_rtx5060_laptop_locked \
+#   ./scripts/run/run_dgemm.sh --platform nvidia_rtx5060_locked
+#   ./scripts/run/run_dgemm.sh --platform nvidia_rtx5060_locked \
 #       --abstraction native --size large --warmup 50 --reps 30
 
 set -euo pipefail
@@ -22,7 +22,7 @@ BUILD_BASE="${REPO_ROOT}/build/dgemm"
 DATA_RAW="${REPO_ROOT}/data/raw"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-PLATFORM="nvidia_rtx5060_laptop_locked"
+PLATFORM="nvidia_rtx5060_locked"
 ABSTRACTION="all"
 SIZE="all"
 WARMUP=50       # warmup-50 required for dynamic-clock platforms (§9.1)

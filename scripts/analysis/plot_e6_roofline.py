@@ -4,7 +4,7 @@ E6 BFS — roofline plot.
 
 fig26_e6_roofline.png — roofline model with all (abstraction, graph_type, size) overlaid.
 
-Hardware: NVIDIA RTX 5060 Laptop
+Hardware: NVIDIA RTX 5060
   - Peak FP64: 261 GFLOP/s  (Blackwell)
   - Peak BW:   272 GB/s     (GDDR7 128-bit; measured E1 STREAM ~270 GB/s)
   - Roofline ridgeline: AI_ridge = 261 / 272 ≈ 0.96 FLOP/byte
@@ -56,7 +56,7 @@ os.makedirs(FIG_DIR, exist_ok=True)
 
 SUMMARY_CSV = os.path.join(DATA_PROC, "e6_bfs_summary.csv")
 
-# ── Hardware parameters (RTX 5060 Laptop) ─────────────────────────────────────
+# ── Hardware parameters (RTX 5060) ─────────────────────────────────────
 PEAK_GFLOPS = 261.0    # FP64 GFLOP/s
 PEAK_GBS    = 272.0    # GB/s
 AI_RIDGE    = PEAK_GFLOPS / PEAK_GBS  # ≈ 0.96
@@ -163,7 +163,7 @@ def main():
         "Use fig23 (efficiency) and fig25 (irregularity) for diagnostics."
     )
     ax.set_title(
-        f"E6 BFS — Roofline (RTX 5060 Laptop, FP64 equivalent)\n{subtitle}",
+        f"E6 BFS — Roofline (RTX 5060, FP64 equivalent)\n{subtitle}",
         fontsize=7.5, fontweight="bold", loc="left"
     )
 

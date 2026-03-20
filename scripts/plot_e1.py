@@ -50,7 +50,7 @@ DATA_PROC  = os.path.join(REPO_ROOT, "data", "processed")
 FIGURES    = os.path.join(REPO_ROOT, "figures", "e1")
 os.makedirs(FIGURES, exist_ok=True)
 
-PLATFORM     = "nvidia_rtx5060_laptop_locked"
+PLATFORM     = "nvidia_rtx5060_locked"
 PEAK_BW_GBS  = 384.0   # GDDR7 12001 MHz × 128-bit × 2 theoretical peak
 
 # ── Abstraction ordering and colors ───────────────────────────────────────────
@@ -88,11 +88,11 @@ SIZE_LABELS = {"small": "Small\n(2²⁰)", "medium": "Medium\n(2²⁴)", "large"
 
 # Platform colors for cross-platform figure (brand colors, colorblind-distinct)
 PLATFORM_COLORS = {
-    "nvidia_rtx5060_laptop_locked": "#76b900",  # NVIDIA green
+    "nvidia_rtx5060_locked": "#76b900",  # NVIDIA green
     "amd_mi300x":                   "#ED1C24",  # AMD red
 }
 PLATFORM_LABELS = {
-    "nvidia_rtx5060_laptop_locked": "NVIDIA RTX 5060 (GDDR7)",
+    "nvidia_rtx5060_locked": "NVIDIA RTX 5060 (GDDR7)",
     "amd_mi300x":                   "AMD MI300X (HBM3)",
 }
 
@@ -402,7 +402,7 @@ def fig8_crossplatform_ppc(summary: pd.DataFrame):
     # Large problem size only; abstractions present on BOTH platforms
     # (SYCL is AMD-only in this experiment — excluded from cross-platform view)
     common_abs = ["native", "kokkos", "raja", "julia"]
-    platforms  = ["nvidia_rtx5060_laptop_locked", "amd_mi300x"]
+    platforms  = ["nvidia_rtx5060_locked", "amd_mi300x"]
 
     large = summary[summary["problem_size"] == "large"].copy()
 

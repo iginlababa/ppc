@@ -32,7 +32,7 @@ DATA_PROC = os.path.join(REPO_ROOT, "data", "processed")
 os.makedirs(DATA_PROC, exist_ok=True)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-PLATFORM = "nvidia_rtx5060_laptop"
+PLATFORM = "nvidia_rtx5060"
 
 ALL_ABSTRACTIONS = [
     "native",
@@ -45,7 +45,7 @@ ALL_ABSTRACTIONS = [
 
 MATRIX_TYPES = ["laplacian_2d", "random_sparse", "power_law"]
 
-# Abstractions with hard CC 12.0 incompatibility on RTX 5060 Laptop
+# Abstractions with hard CC 12.0 incompatibility on RTX 5060
 UNSUPPORTED_CC120 = {"numba"}
 
 PROBLEM_SIZES = {

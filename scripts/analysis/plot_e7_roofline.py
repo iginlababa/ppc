@@ -4,7 +4,7 @@ E7 N-Body — roofline figure.
 
 fig15_e7_roofline.png — roofline model: GFLOP/s vs arithmetic intensity (FLOP/byte)
   Plots measured (AI, GFLOP/s) for each (abstraction, kernel, size) configuration.
-  Overlays the roofline ridge for nvidia_rtx5060_laptop.
+  Overlays the roofline ridge for nvidia_rtx5060.
   AI computed from n_nbrs_mean (stored in CSV) for notile configurations.
   Tile configurations use all-pairs AI = 20*N*(N-1) / (N*(N-1)*16 + N*16) ≈ 1.25.
 
@@ -29,7 +29,7 @@ os.makedirs(FIG_DIR, exist_ok=True)
 
 SUMMARY_CSV = os.path.join(DATA_PROC, "e7_nbody_summary.csv")
 
-# ── RTX 5060 Laptop roofline parameters ───────────────────────────────────────
+# ── RTX 5060 roofline parameters ───────────────────────────────────────
 # FP32 peak: ~12 TFLOP/s (boost); conservative 10 TFLOP/s for sustained
 # Memory bandwidth: ~272 GB/s (GDDR7 24 GB/s × channels)
 PEAK_GFLOPS   = 10_000.0   # 10 TFLOP/s = 10,000 GFLOP/s
@@ -130,7 +130,7 @@ def fig15_roofline(df: pd.DataFrame):
     ax.set_xlabel("Arithmetic Intensity (FLOP/byte)", fontsize=11)
     ax.set_ylabel("GFLOP/s (median)", fontsize=11)
     ax.set_title(
-        "E7 N-Body — Roofline (RTX 5060 Laptop)\n"
+        "E7 N-Body — Roofline (RTX 5060)\n"
         "notile kernel: AI driven by neighbor density; tile: AI ≈ 1.25 (all-pairs)\n"
         "Both kernels are memory-bound (AI << ridge ≈ 36.8 FLOP/byte)",
         fontsize=10, fontweight="bold"

@@ -3,7 +3,7 @@
 E4 SpMV — roofline plot.
 
 fig18_e4_roofline.png — roofline model with all (abstraction, matrix_type, size) overlaid.
-  - Hardware: NVIDIA RTX 5060 Laptop
+  - Hardware: NVIDIA RTX 5060
     - Peak FP64 TFLOP/s: 0.261 TFLOP/s (Blackwell, FP64 = FP32/64 ≈ 261 GFLOP/s)
     - Peak BW: 272 GB/s (GDDR7, 128-bit bus; measured from E1 STREAM native ~270 GB/s)
   - Each (abstraction, matrix_type, size) plotted as a point: (AI, GFLOP/s).
@@ -35,9 +35,9 @@ os.makedirs(FIG_DIR, exist_ok=True)
 
 SUMMARY_CSV = os.path.join(DATA_PROC, "e4_spmv_summary.csv")
 
-# ── Hardware parameters (RTX 5060 Laptop) ─────────────────────────────────────
+# ── Hardware parameters (RTX 5060) ─────────────────────────────────────
 # Peak BW from E1 STREAM native: ~270 GB/s (locked-clock measurement).
-# Peak FP64: RTX 5060 Laptop FP64 rate = FP32/64 ≈ 16.7e3/64 ≈ 261 GFLOP/s.
+# Peak FP64: RTX 5060 FP64 rate = FP32/64 ≈ 16.7e3/64 ≈ 261 GFLOP/s.
 PEAK_BW_GBS      = 270.0   # GB/s — measured upper bound from E1
 PEAK_FP64_GFLOPS = 261.0   # GFLOP/s — hardware ceiling
 
@@ -170,7 +170,7 @@ def main():
         ax.set_xlabel("Arithmetic Intensity (FLOP/byte)")
         ax.set_ylabel("Performance (GFLOP/s)")
         ax.set_title("E4 SpMV — Roofline Analysis\n"
-                     f"RTX 5060 Laptop (peak BW={PEAK_BW_GBS} GB/s, "
+                     f"RTX 5060 (peak BW={PEAK_BW_GBS} GB/s, "
                      f"peak FP64={PEAK_FP64_GFLOPS} GFLOP/s)")
 
         handles = list(legend_abs.values()) + list(legend_mtyp.values()) + size_handles

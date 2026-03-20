@@ -17,3 +17,9 @@ Thread model: posix
 InstalledDir: /opt/rocm-6.3.3/lib/llvm/bin
 Configuration file: /opt/rocm-6.3.3/lib/llvm/bin/clang++.cfg
 
+=== Environment snapshot: 2026-03-20T15:40:37+01:00 ===
+Platform: amd_mi300x
+hipcc: not found
+GCC: gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+Python: /home/obalola/projects/exascale/scripts/env/setup_amd.sh: line 41: python: command not found
+

@@ -31,7 +31,7 @@ PROC_DIR   = os.path.join(REPO_ROOT, "data", "processed")
 OUT_CSV    = os.path.join(PROC_DIR, "e7_nbody_summary.csv")
 os.makedirs(PROC_DIR, exist_ok=True)
 
-# Roofline constants (RTX 5060 Laptop)
+# Roofline constants (RTX 5060)
 PEAK_BW_GBS   = 272.0   # GB/s
 FLOPS_PER_PAIR = 20
 

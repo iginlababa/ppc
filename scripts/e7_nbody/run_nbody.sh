@@ -7,7 +7,7 @@
 # Reps:  30 timed runs, 50 warmup (not timed, in binary)
 #
 # Usage:
-#   ./scripts/e7_nbody/run_nbody.sh [--platform nvidia_rtx5060_laptop] [--reps 30]
+#   ./scripts/e7_nbody/run_nbody.sh [--platform nvidia_rtx5060] [--reps 30]
 #                                   [--sizes "small medium large"]
 #                                   [--abstractions "native_notile native_tile kokkos raja julia"]
 #                                   [--verify]
@@ -20,10 +20,10 @@ BUILD_BASE="${REPO_ROOT}/build/e7_nbody"
 RESULTS_DIR="${REPO_ROOT}/results/e7_nbody/raw"
 mkdir -p "${RESULTS_DIR}"
 
-PLATFORM="nvidia_rtx5060_laptop"
+PLATFORM="nvidia_rtx5060"
 REPS=30
 SIZES="small medium large"
-ABSTRACTIONS="native_notile native_tile kokkos raja julia"
+ABSTRACTIONS=""   # set after arg parse based on platform
 VERIFY=false
 
 while [[ $# -gt 0 ]]; do
@@ -36,6 +36,15 @@ while [[ $# -gt 0 ]]; do
         *) echo "[run_nbody] Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
+
+# Default abstractions depend on platform (can be overridden by --abstractions)
+if [[ -z "${ABSTRACTIONS}" ]]; then
+    if [[ "${PLATFORM}" == amd_* ]]; then
+        ABSTRACTIONS="hip julia"
+    else
+        ABSTRACTIONS="native_notile native_tile kokkos raja julia"
+    fi
+fi
 
 DATE_STR="$(date +%Y%m%d)"
 RAW_CSV="${RESULTS_DIR}/e7_nbody_${PLATFORM}_${DATE_STR}.csv"
@@ -84,6 +93,7 @@ run_one() {
     case "${abs}" in
         native_notile) kernel_col="notile" ;;
         native_tile)   kernel_col="tile" ;;
+        hip)           kernel_col="notile" ;;
         *)             kernel_col="notile" ;;
     esac
 
@@ -112,6 +122,10 @@ for ABS in ${ABSTRACTIONS}; do
     for SZ in ${SIZES}; do
 
         case "${ABS}" in
+            hip)
+                BIN="${BUILD_BASE}/hip_${PLATFORM}/nbody-hip"
+                KFLAG=""
+                ;;
             native_notile)
                 BIN="${BUILD_BASE}/native_${PLATFORM}/nbody-native"
                 KFLAG="--kernel notile"

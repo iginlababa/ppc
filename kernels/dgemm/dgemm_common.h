@@ -42,7 +42,7 @@ static constexpr double DGEMM_ALPHA = 1.0;
 static constexpr double DGEMM_BETA  = 0.0;
 
 // ── Timing protocol ───────────────────────────────────────────────────────────
-// warmup=50 required on dynamic-clock platforms (RTX 5060 Laptop, §5.5).
+// warmup=50 required on dynamic-clock platforms (RTX 5060, §5.5).
 // HBM platforms (A100 etc.) use warmup=10; override via --warmup flag.
 static constexpr int DGEMM_WARMUP_DEFAULT = 50;
 static constexpr int DGEMM_REPS_DEFAULT   = 30;

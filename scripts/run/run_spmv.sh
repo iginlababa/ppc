@@ -10,8 +10,8 @@
 #              run_id,execution_time_ms,throughput_gflops,hw_state_verified
 #
 # Usage:
-#   ./scripts/run/run_spmv.sh --platform nvidia_rtx5060_laptop
-#   ./scripts/run/run_spmv.sh --platform nvidia_rtx5060_laptop \
+#   ./scripts/run/run_spmv.sh --platform nvidia_rtx5060
+#   ./scripts/run/run_spmv.sh --platform nvidia_rtx5060 \
 #       --abstraction native --matrix laplacian_2d --size large \
 #       --warmup 200 --reps 30
 
@@ -23,7 +23,7 @@ BUILD_BASE="${REPO_ROOT}/build/spmv"
 DATA_RAW="${REPO_ROOT}/data/raw"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-PLATFORM="nvidia_rtx5060_laptop"
+PLATFORM="nvidia_rtx5060"
 ABSTRACTION="all"
 MATRIX="all"
 SIZE="all"

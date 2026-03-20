@@ -46,7 +46,7 @@ COLORS = {
     "julia":  "#d62728",
 }
 
-PLATFORM = "nvidia_rtx5060_laptop"
+PLATFORM = "nvidia_rtx5060"
 
 
 # ── Figure 19: efficiency grouped bar chart ───────────────────────────────────

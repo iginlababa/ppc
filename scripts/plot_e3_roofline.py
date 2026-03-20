@@ -2,11 +2,11 @@
 """
 E3 3D Stencil — multi-platform roofline plot.
 
-Two-panel figure: left = NVIDIA RTX 5060 Laptop, right = AMD MI300X.
+Two-panel figure: left = NVIDIA RTX 5060, right = AMD MI300X.
 Each panel shows the roofline model with all abstractions overlaid.
 
 Hardware parameters:
-  NVIDIA RTX 5060 Laptop:
+  NVIDIA RTX 5060:
     Peak BW:   ~270 GB/s (GDDR7, 128-bit bus; measured ~270 GB/s from E1 STREAM)
     Peak FP64: ~261 GFLOP/s (FP32/64 ≈ 16.7 TFLOP/s / 64)
   AMD MI300X:
@@ -39,8 +39,8 @@ SUMMARY_CSV = os.path.join(DATA_PROC, "e3_stencil_summary.csv")
 
 # ── Hardware parameters ───────────────────────────────────────────────────────
 HW = {
-    "nvidia_rtx5060_laptop": {
-        "label":         "NVIDIA RTX 5060 Laptop",
+    "nvidia_rtx5060": {
+        "label":         "NVIDIA RTX 5060",
         "peak_bw_gbs":   270.0,     # GB/s — E1 STREAM native measurement
         "peak_fp64_gflops": 261.0,  # GFLOP/s — FP32/64 ≈ 16700/64
     },
@@ -70,7 +70,7 @@ MARKERS = {
 
 SIZE_ORDER        = ["small", "medium", "large"]
 ABSTRACTION_ORDER = ["native", "kokkos", "raja", "sycl", "julia", "numba"]
-PLATFORM_ORDER    = ["nvidia_rtx5060_laptop", "amd_mi300x"]
+PLATFORM_ORDER    = ["nvidia_rtx5060", "amd_mi300x"]
 
 STYLE = {
     "figure.dpi":        150,
@@ -189,7 +189,7 @@ def main():
         print(f"[plot_e3_roofline] Saved {out}")
 
     # ── Also regenerate the original single-panel NVIDIA figure ──────────────
-    nvidia_key = "nvidia_rtx5060_laptop"
+    nvidia_key = "nvidia_rtx5060"
     if nvidia_key in available:
         df_nv = df[df["platform"] == nvidia_key].copy()
         hw_nv = HW[nvidia_key]

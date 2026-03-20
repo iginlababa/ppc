@@ -272,9 +272,9 @@ These platforms are not part of the primary three-platform experimental matrix b
 
 | Vendor | GPU | Architecture | Memory | Spec Peak BW | Role |
 |---|---|---|---|---|---|
-| NVIDIA | RTX 5060 Laptop | Blackwell (GB107) | 8 GB GDDR7 | 384 GB/s | Development; E1 methodology validation |
+| NVIDIA | RTX 5060 | Blackwell (GB107) | 8 GB GDDR7 | 384 GB/s | Development; E1 methodology validation |
 
-**RTX 5060 Laptop — hardware constraints and required workarounds:**
+**RTX 5060 — hardware constraints and required workarounds:**
 
 1. **Dynamic memory clock (GDDR7 boost):** The memory bus operates at two stable frequencies: 9001 MHz (~271 GB/s) and 12001 MHz (~350 GB/s). The high-performance state is reached only after ~40 iterations of sustained memory bandwidth load. This is an irreversible session-level transition — once triggered it persists until the driver is reset.
 
@@ -598,9 +598,9 @@ Every experiment follows this exact protocol. No deviations.
 
 1. **Hardware lock** — verify and log GPU clock state (§5.3)
 2. **Environment log** — record all software versions
-3. **Warm-up** — execute kernel at minimum **10 times** (never recorded); **50 times on platforms with dynamic memory clocks** (e.g., RTX 5060 Laptop — see §5.5)
+3. **Warm-up** — execute kernel at minimum **10 times** (never recorded); **50 times on platforms with dynamic memory clocks** (e.g., RTX 5060 — see §5.5)
    - Purpose: amortize JIT compilation (Julia), warm GPU caches, exclude runtime init overhead
-   - **Dynamic-clock rationale:** GDDR7 and similar memory subsystems make an irreversible low→high clock transition only after ~40 iterations of sustained bandwidth load. A warmup of 10 is insufficient to trigger this transition; timed runs then sample a mix of low-clock and high-clock states, producing bimodal, non-reproducible distributions. Warmup-50 (60 total pre-timed iterations: 10 pre-warmup + 50 warmup) guarantees the high-performance memory state is active for all 30 timed runs. This requirement was discovered empirically during E1 on the RTX 5060 Laptop (2026-03-14).
+   - **Dynamic-clock rationale:** GDDR7 and similar memory subsystems make an irreversible low→high clock transition only after ~40 iterations of sustained bandwidth load. A warmup of 10 is insufficient to trigger this transition; timed runs then sample a mix of low-clock and high-clock states, producing bimodal, non-reproducible distributions. Warmup-50 (60 total pre-timed iterations: 10 pre-warmup + 50 warmup) guarantees the high-performance memory state is active for all 30 timed runs. This requirement was discovered empirically during E1 on the RTX 5060 (2026-03-14).
    - **Default for HBM platforms** (A100, MI250X, PVC): warmup-10 is sufficient; memory clock is controlled by the lock command.
 4. **Timed runs** — execute kernel **30 times** (all recorded)
 5. **Per-run logging** — compute and store bandwidth/throughput for every individual run
@@ -909,7 +909,7 @@ Every root cause must be attributed to exactly one of these four categories:
   1. Run all abstractions in a single locked-clock session with controlled cooldown between abstractions (≥ 5 minutes for high-TDP GPUs)
   2. Use warmup-50 on dynamic-clock platforms (§9.1) to guarantee consistent memory clock state
   3. Quarantine any CSV where the measured bandwidth peak is > 15% below the established platform ceiling — do not use for PPC computation
-- Evidence: E1 on RTX 5060 Laptop (2026-03-14) — original RAJA run at 172 GB/s (vs. 350 GB/s native) due to post-build thermal throttle; fresh controlled-session run yielded RAJA = 345 GB/s and PPC = 0.990 (see `data/notes/thermal_contamination_20260314.md`)
+- Evidence: E1 on RTX 5060 (2026-03-14) — original RAJA run at 172 GB/s (vs. 350 GB/s native) due to post-build thermal throttle; fresh controlled-session run yielded RAJA = 345 GB/s and PPC = 0.990 (see `data/notes/thermal_contamination_20260314.md`)
 - PPC Impact: Can produce arbitrarily bad apparent PPC (observed 0.49 for RAJA before fix) for an abstraction with true PPC ≥ 0.99
 
 **Pattern 5 — Layout-Induced Coalescing Advantage**
@@ -918,10 +918,10 @@ Every root cause must be attributed to exactly one of these four categories:
 - Root cause: The abstraction's default memory layout (e.g., Julia column-major CuArrays) produces better warp-level memory access patterns than the expert's explicit optimisation strategy. In compute-bound regimes, synchronisation overhead from tiling (`__syncthreads()`) costs more than the global memory bandwidth saved by shared memory reuse
 - Mechanism (E2 evidence): Julia column-major layout maps warp threads to consecutive rows of a matrix column → 32 consecutive `float64`s per warp per inner-loop step (perfect coalescing). The same column index is shared by all warp threads for the second matrix → broadcast access, zero bandwidth pressure. Zero sync barriers vs 512 `__syncthreads()` calls in the native TILE=32 tiled kernel at N=8192
 - Affected workloads: Compute-bound DGEMM at large N where arithmetic intensity exceeds the roofline crossover point (AI ≫ BW_peak / FLOP_peak). Does NOT apply to memory-bound regimes where tiling eliminates reuse traffic
-- Affected platforms: NVIDIA RTX 5060 Laptop (Blackwell, sm_120); expected to generalise to other compute-bound regimes on high-AI kernels
+- Affected platforms: NVIDIA RTX 5060 (Blackwell, sm_120); expected to generalise to other compute-bound regimes on high-AI kernels
 - Implication: Expert optimisation assumptions (tiling always helps) do not hold universally — regime (memory-bound vs compute-bound) determines whether tiling is beneficial or harmful. Decision framework must condition tiling recommendation on measured arithmetic intensity
 - Mitigation (for native kernel): Use cuBLAS or profile-guided tiling decisions conditioned on N; small N favours tiling, large compute-bound N may not
-- Evidence: `dgemm_julia_naive_nvidia_rtx5060_laptop_large_n8192_*` vs `dgemm_native_nvidia_rtx5060_laptop_large_n8192_*` — efficiency=1.2499, confirmed by CUDA event timing
+- Evidence: `dgemm_julia_naive_nvidia_rtx5060_large_n8192_*` vs `dgemm_native_nvidia_rtx5060_large_n8192_*` — efficiency=1.2499, confirmed by CUDA event timing
 - PPC impact: PPC > 1.0 — abstraction exceeds native baseline; counts as excellent portability but requires notation that native baseline is not the theoretical ceiling
 
 ### 12.3 Success Pattern Template

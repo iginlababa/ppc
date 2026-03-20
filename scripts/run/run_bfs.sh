@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run E6 BFS benchmarks.
-# Usage: ./scripts/run/run_bfs.sh [--platform nvidia_rtx5060_laptop] [--reps 30]
+# Usage: ./scripts/run/run_bfs.sh [--platform nvidia_rtx5060] [--reps 30]
 #
 # Loops: abstraction × graph_type × problem_size
 # Emits raw CSVs to data/raw/bfs_{abs}_{platform}_{date}.csv
@@ -22,7 +22,7 @@ BIN_DIR="${REPO_ROOT}/bin/bfs"
 DATA_RAW="${REPO_ROOT}/data/raw"
 mkdir -p "${DATA_RAW}"
 
-PLATFORM="nvidia_rtx5060_laptop"
+PLATFORM="nvidia_rtx5060"
 REPS=30
 ABSTRACTION="all"
 DATE=$(date +%Y%m%d)

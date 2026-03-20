@@ -105,14 +105,14 @@
         "efficiency_medium_fresh_state": 1.29,
         "efficiency_large_fresh_state": 1.20,
         "experiment_ids": [
-          "dgemm_julia_naive_nvidia_rtx5060_laptop_large_n8192_001",
-          "dgemm_native_nvidia_rtx5060_laptop_large_n8192_001"
+          "dgemm_julia_naive_nvidia_rtx5060_large_n8192_001",
+          "dgemm_native_nvidia_rtx5060_large_n8192_001"
         ],
         "validation_method": "CUDA event timing (CUDA.@elapsed) confirms GPU-only kernel time produces same GFLOP/s as wall-clock measurement; max_rel_err < 1e-6 at N=128. Fresh-state nsys profiling (profiles/e2/julia_naive_medium_nsys.nsys-rep) confirms medium-N advantage: 225 GFLOP/s fresh vs 139 GFLOP/s benchmark (1.62x thermal ratio). Large-N benchmark/profiling delta is only 4%, confirming large-N result is thermally clean.",
         "kernel_storage_order_confirmed": "nsys kernel name contains (Int)1 storage-order parameter, confirming column-major layout"
       },
       "affected_workloads": ["dgemm"],
-      "affected_platforms": ["nvidia_rtx5060_laptop"],
+      "affected_platforms": ["nvidia_rtx5060"],
       "implication": "Layout conventions can dominate algorithmic overhead at large problem sizes. Expert optimisation assumptions (tiling always improves performance) do not hold in compute-bound regimes where synchronisation overhead dominates. Decision framework must condition tiling recommendation on measured arithmetic intensity.",
       "mitigation": "N/A — this is a performance advantage for the abstraction. For the native kernel: use cuBLAS or profile-guided tiling decisions conditioned on N.",
       "ppc_impact": "PPC > 1.0 — abstraction exceeds native baseline; counts as excellent portability but native baseline is not the theoretical ceiling",
@@ -173,7 +173,7 @@
       "kernel": "SpTRSV (Sparse Triangular Solve — forward substitution)",
       "status": "complete",
       "completed_date": "2026-03-16",
-      "platform": "nvidia_rtx5060_laptop",
+      "platform": "nvidia_rtx5060",
       "matrix_types": ["lower_triangular_laplacian", "lower_triangular_random"],
       "problem_sizes": {"small": 256, "medium": 2048, "large": 8192},
       "metric": "GFLOP/s = 2*nnz / time_s / 1e9 (consistent with E4; SpTRSV is latency-bound not bandwidth-bound)",
@@ -185,7 +185,7 @@
       "abstractions": ["native", "kokkos", "raja", "julia"],
       "skipped": {
         "numba": "UNSUPPORTED_CC120 — Numba 0.64.0 / Blackwell CC 12.0 PTX mismatch (same as E2-E4)",
-        "sycl":  "NO_COMPILER — no SYCL compiler on nvidia_rtx5060_laptop"
+        "sycl":  "NO_COMPILER — no SYCL compiler on nvidia_rtx5060"
       },
       "kernel_design": "One CUDA/Kokkos/RAJA/Julia kernel launch per level; one thread per row within each level. x reset (cudaMemset) excluded from timed region. Level-set constructed CPU-side (BFS); n_levels kernel launches per solve.",
       "primary_hypothesis": "SpTRSV efficiency gap = P001 Launch Overhead × n_levels. Each abstraction pays its per-launch overhead n_levels times per solve (not once). Julia: ~0.3ms × n_levels; Kokkos: Kokkos::fence overhead × n_levels; RAJA: RAJA::synchronize × n_levels. Compounds with P007 Load Imbalance for lower_triangular_random (irregular level widths). Expected: laplacian (regular levels) → efficiency decays predictably with n_levels; random (irregular) → additional efficiency penalty from uneven warps.",
@@ -220,7 +220,7 @@
       "experiment_id": "E6",
       "kernel": "BFS (Breadth-First Search — level-set frontier expansion)",
       "status": "pending",
-      "platform": "nvidia_rtx5060_laptop",
+      "platform": "nvidia_rtx5060",
       "graph_types": ["erdos_renyi", "2d_grid"],
       "problem_sizes": {"small": 1024, "medium": 16384, "large": 65536},
       "metric": "GTEPS = n_edges / time_s / 1e9 (stored as throughput_gflops for CSV schema consistency)",
@@ -228,7 +228,7 @@
       "abstractions": ["native", "kokkos", "raja", "julia"],
       "skipped": {
         "numba": "UNSUPPORTED_CC120 — same Numba 0.64.0/Blackwell CC 12.0 PTX mismatch as E2-E5",
-        "sycl":  "NO_COMPILER — no SYCL compiler on nvidia_rtx5060_laptop"
+        "sycl":  "NO_COMPILER — no SYCL compiler on nvidia_rtx5060"
       },
       "kernel_design": "Two-phase per BFS level: scatter (one thread per frontier vertex, atomicCAS on d_distances) + compact (Thrust copy_if for native; parallel_scan for Kokkos; exclusive_scan + gather for RAJA; CUDA.cumsum for Julia). One kernel launch per phase per level. d_distances reset excluded from timed region.",
       "primary_hypothesis": "BFS efficiency gap is driven by two independent sources: (1) P008 Level-Set Dispatch Amplification — n_levels kernel launches × per-launch overhead (same as E5 SpTRSV). (2) Frontier irregularity — irregular frontier widths create load imbalance within the scatter phase (compound with P007). Erdos-Renyi (irregular frontiers) expected to show larger abstraction gap than 2d_grid (regular diamond frontiers).",

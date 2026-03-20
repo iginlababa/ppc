@@ -16,8 +16,8 @@
 # These columns are the key diagnostic for interpreting efficiency vs. parallelism.
 #
 # Usage:
-#   ./scripts/run/run_sptrsv.sh --platform nvidia_rtx5060_laptop
-#   ./scripts/run/run_sptrsv.sh --platform nvidia_rtx5060_laptop \
+#   ./scripts/run/run_sptrsv.sh --platform nvidia_rtx5060
+#   ./scripts/run/run_sptrsv.sh --platform nvidia_rtx5060 \
 #       --abstraction native --matrix lower_triangular_laplacian --size large \
 #       --warmup 200 --reps 30 --verify
 
@@ -29,7 +29,7 @@ BUILD_BASE="${REPO_ROOT}/build/sptrsv"
 DATA_RAW="${REPO_ROOT}/data/raw"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-PLATFORM="nvidia_rtx5060_laptop"
+PLATFORM="nvidia_rtx5060"
 ABSTRACTION="all"
 MATRIX="all"
 SIZE="all"
