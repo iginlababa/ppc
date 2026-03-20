@@ -10,7 +10,7 @@
 # Warmup: E1 protocol (50 fixed iterations).
 #
 # Usage: julia --project=. kernels/nbody/kernel_nbody_julia.jl \
-#            --n 4000 --kernel notile --reps 30 --platform nvidia_rtx5060_laptop
+#            --n 4000 --kernel notile --reps 30 --platform nvidia_rtx5060
 
 using CUDA
 using Printf
@@ -264,7 +264,7 @@ end
 function parse_args()
     n_atoms    = 4000
     reps       = 30
-    platform   = "nvidia_rtx5060_laptop"
+    platform   = "nvidia_rtx5060"
     size_label = "small"
     do_verify  = false
     i = 1
