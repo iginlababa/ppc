@@ -1,0 +1,5 @@
+kernel,abstraction,problem_size,ppc,n_platforms,platforms,ppc_tier,min_efficiency,max_efficiency
+dgemm,julia_cublas,large,1.4414,1,nvidia_rtx5060_laptop,excellent,1.4414,1.4414
+dgemm,julia_naive,large,1.2501,1,nvidia_rtx5060_laptop,excellent,1.2501,1.2501
+dgemm,native_cublas,large,1.0017,1,nvidia_rtx5060_laptop,excellent,1.0017,1.0017
+dgemm,raja_naive,large,0.483,1,nvidia_rtx5060_laptop,poor,0.483,0.483

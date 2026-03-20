@@ -1,3 +1,4 @@
 kernel,abstraction,platform,problem_size,throughput_median,throughput_iqr,throughput_min,throughput_max,n_runs,native_throughput,efficiency,profiling_reason
 dgemm,julia_naive,amd_mi300x,large,2210.5379095,1.812292499999785,2207.138626,2220.37156,30,7213.989754,0.30642376616549877,efficiency=0.306 < 0.85
 dgemm,raja_naive,amd_mi300x,large,1363.646976,8.197338499999887,1345.517763,1373.059143,30,7213.989754,0.18902812763823063,efficiency=0.189 < 0.85
+dgemm,raja_naive,nvidia_rtx5060_laptop,large,85.10743199999999,0.2583327500000081,84.861235,85.492496,30,176.224018,0.4829502412094587,efficiency=0.483 < 0.85

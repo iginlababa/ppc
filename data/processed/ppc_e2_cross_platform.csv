@@ -1,0 +1,3 @@
+kernel,abstraction,problem_size,ppc,n_platforms,platforms,ppc_tier,min_efficiency,max_efficiency
+dgemm,julia_naive,large,0.4922,2,"amd_mi300x,nvidia_rtx5060_laptop",poor,0.3064,1.2501
+dgemm,raja_naive,large,0.2717,2,"amd_mi300x,nvidia_rtx5060_laptop",poor,0.189,0.483
