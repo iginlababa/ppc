@@ -63,6 +63,7 @@ COLORS = {
     "raja":   "#FFB000",   # amber
     "julia":  "#DC267F",   # magenta
     "numba":  "#FE6100",   # orange
+    "sycl":   "#009E73",   # teal (colorblind-safe)
 }
 
 LABELS = {
@@ -74,12 +75,13 @@ LABELS = {
 }
 
 # ── AMD-specific constants ─────────────────────────────────────────────────────
-AMD_ABSTRACTIONS = ["native", "kokkos", "raja", "julia"]
+AMD_ABSTRACTIONS = ["native", "kokkos", "raja", "julia", "sycl"]
 AMD_LABELS = {
     "native": "HIP (native)",
     "kokkos": "Kokkos",
     "raja":   "RAJA",
     "julia":  "Julia/AMDGPU.jl",
+    "sycl":   "SYCL (AdaptiveCpp)",
 }
 SIZE_ORDER  = ["small", "medium", "large"]
 SIZE_LABELS = {"small": "Small\n(2²⁰)", "medium": "Medium\n(2²⁴)", "large": "Large\n(2²⁸)"}
@@ -397,8 +399,9 @@ def fig7_amd_size_sensitivity(summary: pd.DataFrame):
 
 # ── Fig 8: Cross-platform PPC (large problem size) ────────────────────────────
 def fig8_crossplatform_ppc(summary: pd.DataFrame):
-    # Large problem size only; abstractions present on both platforms
-    common_abs = AMD_ABSTRACTIONS  # native, kokkos, raja, julia
+    # Large problem size only; abstractions present on BOTH platforms
+    # (SYCL is AMD-only in this experiment — excluded from cross-platform view)
+    common_abs = ["native", "kokkos", "raja", "julia"]
     platforms  = ["nvidia_rtx5060_laptop_locked", "amd_mi300x"]
 
     large = summary[summary["problem_size"] == "large"].copy()

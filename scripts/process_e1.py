@@ -47,7 +47,7 @@ PLATFORM_CONFIGS = {
     "amd_mi300x": {
         "peak_bw_gbs":         5300.0,  # HBM3 theoretical peak
         "warmup_drop":         0,        # hw_state_verified is the sole warmup gate
-        "abstractions":        ["native", "kokkos", "raja", "julia"],
+        "abstractions":        ["native", "kokkos", "raja", "julia", "sycl"],
         "select_native_batch0": False,
     },
 }
