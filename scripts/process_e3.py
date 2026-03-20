@@ -6,6 +6,9 @@ Loads raw per-abstraction CSVs for all platforms, filters clean runs
 (hw_state_verified=1), computes per-size statistics and efficiency relative
 to native baseline per platform, saves data/processed/e3_stencil_summary.csv.
 
+Also computes cross-platform PPC scores (Pennycook et al. harmonic-mean
+efficiency) saved to data/processed/e3_ppc_scores.csv.
+
 E3 DESIGN DECISIONS
 [D1] Problem sizes: small=32³, medium=128³, large=256³.
 [D3] Primary metric: GB/s (memory-bound kernel, AI≈0.2 FLOP/byte).
@@ -14,6 +17,9 @@ E3 DESIGN DECISIONS
      run_id in raw CSV starts at 1 (first timed rep), so all rows are clean.
 [D6] experiment_id: stencil_{abstraction}_{platform}_{size_label}_n{N}_{run_id:03d}
 Measurement protocol: locked-clock session, adaptive warmup (§9.1 amended).
+[D8] Cross-platform PPC: Pennycook harmonic-mean efficiency across all platforms
+     that support an abstraction. Abstractions absent on a platform are excluded
+     from that platform's H set (not counted as zero).
 """
 
 import glob
@@ -197,6 +203,52 @@ def compute_efficiency(stats: pd.DataFrame) -> pd.DataFrame:
     return stats
 
 
+# ── Cross-platform PPC scores (Pennycook harmonic mean) ──────────────────────
+def compute_ppc_scores(stats: pd.DataFrame) -> pd.DataFrame:
+    """
+    For each (abstraction, problem_size) pair, compute:
+      phi = |H| / sum(1/eff_i for i in H)
+    where H is the set of platforms that have a valid (non-native, non-ceiling)
+    efficiency for that abstraction.  Native is included (eff=1.0) to anchor
+    the harmonic mean.
+
+    Returns a DataFrame with columns:
+      abstraction, problem_size, n_platforms, phi, platforms
+    """
+    rows = []
+    for (abs_name, size), grp in stats.groupby(["abstraction", "problem_size"]):
+        valid = grp[~grp["efficiency"].isna() & (grp["efficiency"] > 0)]
+        if valid.empty:
+            continue
+        effs      = valid["efficiency"].to_numpy(dtype=float)
+        platforms = list(valid["platform"])
+        n         = len(effs)
+        phi       = n / float(np.sum(1.0 / effs)) if np.all(effs > 0) else 0.0
+        rows.append({
+            "abstraction":  abs_name,
+            "problem_size": size,
+            "n_platforms":  n,
+            "phi":          round(phi, 4),
+            "platforms":    "|".join(sorted(platforms)),
+        })
+
+    df = pd.DataFrame(rows)
+    size_order = {"small": 0, "medium": 1, "large": 2}
+    df["_ord"] = df["problem_size"].map(size_order)
+    df = df.sort_values(["abstraction", "_ord"]).drop(columns="_ord").reset_index(drop=True)
+    return df
+
+
+def print_ppc_report(ppc: pd.DataFrame):
+    print()
+    print("E3 Cross-Platform PPC Scores (Pennycook φ, harmonic mean of efficiency):")
+    print(f"  {'Abstraction':18s} {'Size':8s} {'Platforms':2s}  {'φ (PPC)':>8s}")
+    print(f"  {'-'*18} {'-'*8} {'-'*2}  {'-'*8}")
+    for _, row in ppc.iterrows():
+        print(f"  {row['abstraction']:18s} {row['problem_size']:8s} "
+              f"{row['n_platforms']:2d}  {row['phi']:8.4f}")
+
+
 # ── Report ────────────────────────────────────────────────────────────────────
 def print_report(stats: pd.DataFrame):
     print()
@@ -261,7 +313,14 @@ def main():
     stats.to_csv(out_path, index=False)
     print(f"[process_e3] Saved → {out_path}")
 
+    print("[process_e3] Computing cross-platform PPC scores ...")
+    ppc = compute_ppc_scores(stats)
+    ppc_path = os.path.join(DATA_PROC, "e3_ppc_scores.csv")
+    ppc.to_csv(ppc_path, index=False)
+    print(f"[process_e3] Saved → {ppc_path}")
+
     print_report(stats)
+    print_ppc_report(ppc)
 
     n_flagged = int(stats["flag_deep_profiling"].sum())
     if n_flagged > 0:

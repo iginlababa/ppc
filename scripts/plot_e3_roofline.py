@@ -17,7 +17,7 @@ AI = STENCIL_FLOP_PER_CELL / STENCIL_BYTES_PER_CELL = 13/64 ≈ 0.203 FLOP/byte.
 Ridgeline: NVIDIA ≈ 261/270 ≈ 0.97 FLOP/byte; AMD ≈ 163400/4010 ≈ 40.7 FLOP/byte.
 Both platforms are firmly memory-bound at AI ≈ 0.203.
 
-Output: figures/e3/fig_e3_roofline_multiplatform.pdf
+Output: figures/e3/fig_e3_roofline_multiplatform.png
 """
 
 import os
@@ -183,8 +183,8 @@ def main():
 
         fig.suptitle("E3 3D Stencil — Roofline Analysis", fontsize=13, y=1.01)
         fig.tight_layout()
-        out = os.path.join(FIG_DIR, "fig_e3_roofline_multiplatform.pdf")
-        fig.savefig(out, bbox_inches="tight")
+        out = os.path.join(FIG_DIR, "fig_e3_roofline_multiplatform.png")
+        fig.savefig(out, dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"[plot_e3_roofline] Saved {out}")
 
