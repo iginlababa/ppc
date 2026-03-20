@@ -215,13 +215,18 @@ if [[ "${_RAJA_OK}" == "true" ]]; then
     mkdir -p "${BUILD_RAJA}"
 
     if [[ "${VENDOR}" == "amd" ]]; then
-        echo "[build_spmv] Building spmv-raja (RAJA::forall over rows, HIP backend) ..."
-        hipcc -O3 -ffast-math -Wall -Wextra \
+        echo "[build_spmv] Building spmv-raja (RAJA::forall over rows, HIP backend, two-step) ..."
+
+        hipcc -O3 -ffast-math \
             --offload-arch="${HIP_ARCH}" \
             -std=c++17 \
             -I "${RAJA_INSTALL_PREFIX}/include" \
             -I "${KERNEL_DIR}" \
-            "${KERNEL_DIR}/kernel_spmv_raja.cpp" \
+            -c "${KERNEL_DIR}/kernel_spmv_raja.cpp" \
+            -o "${BUILD_RAJA}/kernel_spmv_raja.o"
+
+        hipcc --offload-arch="${HIP_ARCH}" \
+            "${BUILD_RAJA}/kernel_spmv_raja.o" \
             "${RAJA_INSTALL_PREFIX}/lib/libRAJA.a" \
             "${RAJA_INSTALL_PREFIX}/lib/libcamp.a" \
             -lamdhip64 -ldl -lpthread \

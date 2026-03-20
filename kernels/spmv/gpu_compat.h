@@ -17,6 +17,8 @@
 #  define gpuMemcpyHostToDevice hipMemcpyHostToDevice
 #  define gpuMemcpyDeviceToHost hipMemcpyDeviceToHost
 #  define gpuSuccess            hipSuccess
+#  define gpuError_t            hipError_t
+#  define gpuGetErrorString     hipGetErrorString
 #else
 #  include <cuda_runtime.h>
 #  define gpuMalloc             cudaMalloc
@@ -27,4 +29,6 @@
 #  define gpuMemcpyHostToDevice cudaMemcpyHostToDevice
 #  define gpuMemcpyDeviceToHost cudaMemcpyDeviceToHost
 #  define gpuSuccess            cudaSuccess
+#  define gpuError_t            cudaError_t
+#  define gpuGetErrorString     cudaGetErrorString
 #endif
