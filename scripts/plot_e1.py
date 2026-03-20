@@ -47,7 +47,7 @@ mpl.rcParams.update({
 REPO_ROOT  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_RAW   = os.path.join(REPO_ROOT, "data", "raw")
 DATA_PROC  = os.path.join(REPO_ROOT, "data", "processed")
-FIGURES    = os.path.join(REPO_ROOT, "figures")
+FIGURES    = os.path.join(REPO_ROOT, "figures", "e1")
 os.makedirs(FIGURES, exist_ok=True)
 
 PLATFORM     = "nvidia_rtx5060_laptop_locked"
@@ -71,6 +71,27 @@ LABELS = {
     "raja":   "RAJA",
     "julia":  "Julia/CUDA.jl",
     "numba":  "Numba",
+}
+
+# ── AMD-specific constants ─────────────────────────────────────────────────────
+AMD_ABSTRACTIONS = ["native", "kokkos", "raja", "julia"]
+AMD_LABELS = {
+    "native": "HIP (native)",
+    "kokkos": "Kokkos",
+    "raja":   "RAJA",
+    "julia":  "Julia/AMDGPU.jl",
+}
+SIZE_ORDER  = ["small", "medium", "large"]
+SIZE_LABELS = {"small": "Small\n(2²⁰)", "medium": "Medium\n(2²⁴)", "large": "Large\n(2²⁸)"}
+
+# Platform colors for cross-platform figure (brand colors, colorblind-distinct)
+PLATFORM_COLORS = {
+    "nvidia_rtx5060_laptop_locked": "#76b900",  # NVIDIA green
+    "amd_mi300x":                   "#ED1C24",  # AMD red
+}
+PLATFORM_LABELS = {
+    "nvidia_rtx5060_laptop_locked": "NVIDIA RTX 5060 (GDDR7)",
+    "amd_mi300x":                   "AMD MI300X (HBM3)",
 }
 
 # ── Data loading ──────────────────────────────────────────────────────────────
@@ -305,21 +326,144 @@ def fig6_hw_state(raw: pd.DataFrame):
     savefig(fig, "fig6_e1_hw_state_timeline.png")
 
 
+# ── Fig 7: AMD MI300X — bandwidth vs problem size ─────────────────────────────
+def fig7_amd_size_sensitivity(summary: pd.DataFrame):
+    amd = summary[summary["platform"] == "amd_mi300x"].copy()
+
+    n_sizes = len(SIZE_ORDER)
+    n_abs   = len(AMD_ABSTRACTIONS)
+    width   = 0.18
+    x       = np.arange(n_sizes)
+
+    fig, axes = plt.subplots(1, 2, figsize=(7.5, 3.2),
+                             gridspec_kw={"wspace": 0.35})
+
+    # ── left panel: absolute bandwidth ────────────────────────────────────────
+    ax = axes[0]
+    for i, abs_name in enumerate(AMD_ABSTRACTIONS):
+        offsets = x + (i - (n_abs - 1) / 2) * width
+        vals = [
+            float(amd.loc[(amd["abstraction"] == abs_name) &
+                           (amd["problem_size"] == sz), "median_bw_gbs"].iloc[0])
+            if not amd.loc[(amd["abstraction"] == abs_name) &
+                            (amd["problem_size"] == sz)].empty else 0.0
+            for sz in SIZE_ORDER
+        ]
+        ax.bar(offsets, vals, width,
+               color=COLORS[abs_name], edgecolor="white",
+               linewidth=0.6, label=AMD_LABELS[abs_name], zorder=2)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([SIZE_LABELS[s] for s in SIZE_ORDER])
+    ax.set_ylabel("Median throughput (GB/s)")
+    ax.set_title("Absolute bandwidth")
+    ax.legend(frameon=False, fontsize=7.5, loc="upper left")
+    ax.grid(axis="y", linestyle=":", linewidth=0.5, alpha=0.5)
+
+    # ── right panel: PPC relative to native at each size ──────────────────────
+    ax = axes[1]
+    for i, abs_name in enumerate(AMD_ABSTRACTIONS):
+        offsets = x + (i - (n_abs - 1) / 2) * width
+        vals = [
+            float(amd.loc[(amd["abstraction"] == abs_name) &
+                           (amd["problem_size"] == sz), "ppc"].iloc[0])
+            if not amd.loc[(amd["abstraction"] == abs_name) &
+                            (amd["problem_size"] == sz)].empty else 0.0
+            for sz in SIZE_ORDER
+        ]
+        ax.bar(offsets, vals, width,
+               color=COLORS[abs_name], edgecolor="white",
+               linewidth=0.6, zorder=2)
+
+    ax.axhline(0.90, linestyle="--", color="#555555", linewidth=0.8, zorder=1)
+    ax.axhline(0.70, linestyle=":",  color="#888888", linewidth=0.8, zorder=1)
+    ax.text(n_sizes - 0.05, 0.904, "0.90",
+            ha="right", va="bottom", fontsize=7, color="#555555")
+    ax.text(n_sizes - 0.05, 0.704, "0.70",
+            ha="right", va="bottom", fontsize=7, color="#888888")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([SIZE_LABELS[s] for s in SIZE_ORDER])
+    ax.set_ylabel("PPC (relative to native at same size)")
+    ax.set_title("Relative efficiency (PPC)")
+    ax.set_ylim(0, 1.20)
+    ax.grid(axis="y", linestyle=":", linewidth=0.5, alpha=0.5)
+
+    fig.suptitle("E1 STREAM Triad — AMD MI300X: bandwidth vs problem size",
+                 fontsize=10, y=1.01)
+
+    savefig(fig, "fig7_e1_amd_size_sensitivity.png")
+
+
+# ── Fig 8: Cross-platform PPC (large problem size) ────────────────────────────
+def fig8_crossplatform_ppc(summary: pd.DataFrame):
+    # Large problem size only; abstractions present on both platforms
+    common_abs = AMD_ABSTRACTIONS  # native, kokkos, raja, julia
+    platforms  = ["nvidia_rtx5060_laptop_locked", "amd_mi300x"]
+
+    large = summary[summary["problem_size"] == "large"].copy()
+
+    n_abs    = len(common_abs)
+    n_plat   = len(platforms)
+    width    = 0.30
+    x        = np.arange(n_abs)
+
+    fig, ax = plt.subplots(figsize=(5.0, 3.2))
+
+    for j, platform in enumerate(platforms):
+        offsets = x + (j - (n_plat - 1) / 2) * width
+        vals = [
+            float(large.loc[(large["platform"] == platform) &
+                             (large["abstraction"] == abs_name), "ppc"].iloc[0])
+            if not large.loc[(large["platform"] == platform) &
+                              (large["abstraction"] == abs_name)].empty else 0.0
+            for abs_name in common_abs
+        ]
+        hatch = None if j == 0 else "////"
+        ax.bar(offsets, vals, width,
+               color=PLATFORM_COLORS[platform],
+               edgecolor="white", linewidth=0.6,
+               hatch=hatch, label=PLATFORM_LABELS[platform], zorder=2)
+        for k, v in enumerate(vals):
+            ax.text(offsets[k], v + 0.008, f"{v:.2f}",
+                    ha="center", va="bottom", fontsize=6.5)
+
+    ax.axhline(1.0, linestyle="--", color="black", linewidth=0.8, zorder=1,
+               label="Native baseline (PPC = 1.0)")
+    ax.axhline(0.90, linestyle=":",  color="#555555", linewidth=0.7, zorder=1)
+    ax.text(n_abs - 0.05, 0.904, "0.90",
+            ha="right", va="bottom", fontsize=7, color="#555555")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([AMD_LABELS[a] for a in common_abs], rotation=12, ha="right")
+    ax.set_ylabel("PPC (median BW / native median BW)")
+    ax.set_title("E1 STREAM Triad — cross-platform PPC\n"
+                 "(large problem size: 2²⁸ elements, hw_state=1 clean runs)")
+    ax.legend(frameon=False, fontsize=7.5, loc="lower left")
+    ax.set_ylim(0, 1.22)
+    ax.grid(axis="y", linestyle=":", linewidth=0.5, alpha=0.5)
+
+    savefig(fig, "fig8_e1_crossplatform_ppc.png")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     print("[plot_e1] Loading data ...")
-    summary = load_summary()
-    raw     = load_raw()
+    summary      = load_summary()
+    nvidia_summ  = summary[summary["platform"] == PLATFORM].copy()
+    raw          = load_raw()
 
     print("[plot_e1] Generating figures ...")
     fig1_stability(raw)
-    fig2_median_bw(summary)
-    fig3_ppc(summary)
-    fig4_roofline(summary)
-    fig5_cv(summary)
+    fig2_median_bw(nvidia_summ)
+    fig3_ppc(nvidia_summ)
+    fig4_roofline(nvidia_summ)
+    fig5_cv(nvidia_summ)
     fig6_hw_state(raw)
+    fig7_amd_size_sensitivity(summary)
+    fig8_crossplatform_ppc(summary)
 
-    print(f"[plot_e1] All 6 figures saved to {FIGURES}/")
+    print(f"[plot_e1] All 8 figures saved to {FIGURES}/")
 
 
 if __name__ == "__main__":
