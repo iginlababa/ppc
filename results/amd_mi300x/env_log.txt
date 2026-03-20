@@ -1,0 +1,19 @@
+# AMD MI300X Environment Log
+# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+# NOTE: GPU compute not yet active (ROCk module pending reboot to kernel 6.8.0-106-generic)
+
+## Hardware
+GPU: AMD Instinct MI300X VF (Aqua Vanjaram)
+PCI ID: 1002:74B5
+Architecture: CDNA 3 (gfx942)
+PCIe slot: 0000:83:00.0
+
+## Software Stack
+# Generated: 2026-03-20T02:20:50Z
+HIP version: 6.3.42134-a9a80e791
+AMD clang version 18.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.3.3 25012 e5bf7e55c91490b07c49d8960fa7983d864936c4)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /opt/rocm-6.3.3/lib/llvm/bin
+Configuration file: /opt/rocm-6.3.3/lib/llvm/bin/clang++.cfg
+
