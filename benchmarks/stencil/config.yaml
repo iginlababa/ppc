@@ -1,60 +1,72 @@
 experiment_id: E3
 kernel: stencil
-description: "3D structured-grid stencil — 7-point or 27-point Laplacian"
+description: "3D structured-grid stencil — 7-point Jacobi (memory-bound)"
 group: regular
 source: "Mantevo MiniGhost, RAJAPerf"
-primary_metric: [throughput_gflops, bandwidth_gbs]
-stencil_type: 7point   # options: 7point | 27point
+primary_metric: bandwidth_gbs
+secondary_metric: throughput_gflops
+
+stencil_type: 7point
+coefficients:
+  c0: 0.5
+  c1: 0.0833333   # (1 - c0) / 6
+arithmetic_intensity: 0.203  # 13 FLOP / 64 bytes per interior cell
 
 problem_sizes:
   small:
-    nx: 64
-    ny: 64
-    nz: 64
-    description: "Cache-resident problem"
+    n: 32
+    description: "Cache-resident; baseline correctness check"
   medium:
-    nx: 256
-    ny: 256
-    nz: 256
-    description: "Realistic CFD/seismic grid"
+    n: 128
+    description: "Transitional; partial DRAM traffic"
   large:
-    nx: 512
-    ny: 512
-    nz: 512
+    n: 256
     description: "Memory-bound; forces DRAM traffic"
 
 timing:
-  warmup_iterations: 10
+  warmup_protocol: adaptive_cv    # CV < 2% over last 10 timings (§9.1 amended)
+  warmup_min: 10
+  warmup_max: 200
   timed_iterations: 30
-  statistics: [median, iqr, min, max]
-  outlier_threshold_sigma: 2.0
+  statistics: [median, iqr, min, max, mean]
+  hw_state_threshold: 0.15        # ±15% of median flagged hw_state=0
 
 thread_config:
-  # Override per platform in scripts/env/setup_*.sh
-  block_x: 16
-  block_y: 16
-  block_z: 1
+  # Block (32, 4, 2) = 256 threads: ix-fastest for coalescing (D4)
+  block_x: 32
+  block_y: 4
+  block_z: 2
 
 abstractions:
-  - native
-  - kokkos
-  - raja
-  - sycl
-  - julia
+  nvidia_rtx5060_laptop:
+    - native      # stencil-cuda: __global__ kernel, 3D grid
+    - kokkos      # MDRangePolicy<Rank<3>> tiling {2,4,32}
+    - raja        # RAJA::kernel 3D (iz→block_z, iy→block_y, ix→thread_x)
+    - sycl        # nd_range<3> USM, work-group {2,4,32}
+    - julia       # CUDA.jl @cuda backend
+    - numba       # UNSUPPORTED: CC 12.0 Blackwell, PTX 9.2 > driver max PTX 9.1
+  amd_mi300x:
+    - native      # stencil-hip: HIP __global__ kernel, 3D grid
+    - kokkos      # MDRangePolicy<Rank<3>> HIP backend
+    - raja        # RAJA::kernel 3D HIP policy
+    - sycl        # AdaptiveCpp --acpp-targets=hip:gfx942
+    - julia       # AMDGPU.jl @roc backend
 
 platforms:
-  - nvidia_a100
-  - amd_mi250x
-  - intel_pvc
-
-notes:
-  - "Tests multi-dimensional indexing abstractions and memory layout defaults"
-  - "Known Kokkos layout mismatch pattern (Pattern 3 in taxonomy)"
-  - "NVIDIA prefers LayoutLeft — verify Kokkos default"
+  - nvidia_rtx5060_laptop
+  - amd_mi300x
 
 correctness:
-  tolerance: 1.0e-6
+  tolerance: 1.0e-10
   reference: native
+  verify_n: 16
 
 deep_profiling_trigger:
-  overhead_threshold: 0.15
+  overhead_threshold: 0.15   # efficiency < 0.85 → flag for nsys/ncu
+
+notes:
+  - "AI ≈ 0.203 FLOP/byte → firmly memory-bound on both NVIDIA and AMD"
+  - "All abstractions share the same AI; roofline points differ only in GB/s"
+  - "Adaptive warmup (D7): CV<2% stops warmup early; max 200 iters"
+  - "Julia kernel: backend-aware via JULIA_GPU_BACKEND=cuda|amdgpu env var"
+  - "SYCL on AMD: AdaptiveCpp (acpp), not Intel DPC++ (-fsycl omitted)"

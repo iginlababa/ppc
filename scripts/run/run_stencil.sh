@@ -70,20 +70,34 @@ CSV_LABEL[numba]="numba"
 
 ALL_ABSTRACTIONS=(native kokkos raja sycl julia numba)
 
+# ── AMD platform overrides ────────────────────────────────────────────────────
+# On AMD, native → stencil-hip; numba is unsupported; set Julia backend.
+_VENDOR="${PLATFORM%%_*}"
+if [[ "${_VENDOR}" == "amd" ]]; then
+    BINARY_NAME[native]="stencil-hip"
+    ALL_ABSTRACTIONS=(native kokkos raja sycl julia)
+    export JULIA_GPU_BACKEND="amdgpu"
+fi
+
 # ── Binary finder ─────────────────────────────────────────────────────────────
 find_binary() {
     local abs="$1"
     local bin_name="${BINARY_NAME[$abs]}"
     local dir_stem
-    case "${abs}" in
-        native)  dir_stem="cuda"   ;;
-        kokkos)  dir_stem="kokkos" ;;
-        raja)    dir_stem="raja"   ;;
-        sycl)    dir_stem="sycl"   ;;
-        julia)   dir_stem="julia"  ;;
-        numba)   dir_stem="numba"  ;;
-        *)       dir_stem="${abs}" ;;
-    esac
+    # On AMD, native binary lives in the hip_* build directory
+    if [[ "${_VENDOR}" == "amd" && "${abs}" == "native" ]]; then
+        dir_stem="hip"
+    else
+        case "${abs}" in
+            native)  dir_stem="cuda"   ;;
+            kokkos)  dir_stem="kokkos" ;;
+            raja)    dir_stem="raja"   ;;
+            sycl)    dir_stem="sycl"   ;;
+            julia)   dir_stem="julia"  ;;
+            numba)   dir_stem="numba"  ;;
+            *)       dir_stem="${abs}" ;;
+        esac
+    fi
 
     local p="${BUILD_BASE}/${dir_stem}_${PLATFORM}/${bin_name}"
     [[ -x "${p}" ]] && { echo "${p}"; return 0; }

@@ -21,18 +21,30 @@
 #include <string>
 #include <vector>
 
+#include "gpu_compat.h"
 #include "stencil_common.h"
 
 // ── RAJA 3D kernel policy ─────────────────────────────────────────────────────
-// Segments: (ix, iy, iz) with dims (0,1,2).
-// Thread mapping: For<2,ix> → thread_x (innermost, 256 threads per block);
+// Segments: (iz, iy, ix) with dims (0,1,2).
+// Thread mapping: For<2,ix> → thread_x (innermost, coalesced);
 //                 For<1,iy> → block_y; For<0,iz> → block_z.
+#ifdef __HIP_PLATFORM_AMD__
+using StencilPolicy3D = RAJA::KernelPolicy<
+    RAJA::statement::HipKernel<
+        RAJA::statement::For<0, RAJA::hip_block_z_loop,
+            RAJA::statement::For<1, RAJA::hip_block_y_loop,
+                RAJA::statement::For<2, RAJA::hip_thread_x_loop,
+                    RAJA::statement::Lambda<0>>>>>>;
+using SyncPolicy = RAJA::hip_synchronize;
+#else
 using StencilPolicy3D = RAJA::KernelPolicy<
     RAJA::statement::CudaKernel<
         RAJA::statement::For<0, RAJA::cuda_block_z_loop,
             RAJA::statement::For<1, RAJA::cuda_block_y_loop,
                 RAJA::statement::For<2, RAJA::cuda_thread_x_loop,
                     RAJA::statement::Lambda<0>>>>>>;
+using SyncPolicy = RAJA::cuda_synchronize;
+#endif
 
 void run_stencil_raja(int N, double c0, double c1,
                        const double* d_in, double* d_out) {
@@ -49,7 +61,7 @@ void run_stencil_raja(int N, double c0, double c1,
                       + d_in[ctr - N]     + d_in[ctr + N]
                       + d_in[ctr - NN]    + d_in[ctr + NN]);
         });
-    RAJA::synchronize<RAJA::cuda_synchronize>();
+    RAJA::synchronize<SyncPolicy>();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -103,14 +115,14 @@ int main(int argc, char** argv) {
         stencil_cpu_ref(Nv, STENCIL_C0, STENCIL_C1, hIn.data(), hRef.data());
 
         double *dvIn = nullptr, *dvOut = nullptr;
-        cudaMalloc(&dvIn,  bv); cudaMalloc(&dvOut, bv);
-        cudaMemcpy(dvIn, hIn.data(), bv, cudaMemcpyHostToDevice);
-        cudaMemset(dvOut, 0, bv);
+        gpuMalloc(&dvIn,  bv); gpuMalloc(&dvOut, bv);
+        gpuMemcpy(dvIn, hIn.data(), bv, gpuMemcpyHostToDevice);
+        gpuMemset(dvOut, 0, bv);
 
         run_stencil_raja(Nv, STENCIL_C0, STENCIL_C1, dvIn, dvOut);
 
-        cudaMemcpy(hOut.data(), dvOut, bv, cudaMemcpyDeviceToHost);
-        cudaFree(dvIn); cudaFree(dvOut);
+        gpuMemcpy(hOut.data(), dvOut, bv, gpuMemcpyDeviceToHost);
+        gpuFree(dvIn); gpuFree(dvOut);
 
         double max_err = 0.0;
         bool ok = stencil_verify(hOut.data(), hRef.data(), Nv, STENCIL_CORRECT_TOL, &max_err);
@@ -129,13 +141,13 @@ int main(int argc, char** argv) {
     init_grid(hIn.data(), N);
 
     double *dIn = nullptr, *dOut = nullptr;
-    if (cudaMalloc(&dIn,  bytes) != cudaSuccess ||
-        cudaMalloc(&dOut, bytes) != cudaSuccess) {
-        std::fprintf(stderr, "cudaMalloc failed for N=%d\n", N);
+    if (gpuMalloc(&dIn,  bytes) != gpuSuccess ||
+        gpuMalloc(&dOut, bytes) != gpuSuccess) {
+        std::fprintf(stderr, "gpuMalloc failed for N=%d\n", N);
         return 1;
     }
-    cudaMemcpy(dIn, hIn.data(), bytes, cudaMemcpyHostToDevice);
-    cudaMemset(dOut, 0, bytes);
+    gpuMemcpy(dIn, hIn.data(), bytes, gpuMemcpyHostToDevice);
+    gpuMemset(dOut, 0, bytes);
 
     auto run_once = [&]() {
         run_stencil_raja(N, STENCIL_C0, STENCIL_C1, dIn, dOut);
@@ -168,6 +180,6 @@ int main(int argc, char** argv) {
     StencilStats stats = compute_stencil_stats(gbs_vec, flags);
     stencil_print_summary(N, stats, warmup_iters);
 
-    cudaFree(dIn); cudaFree(dOut);
+    gpuFree(dIn); gpuFree(dOut);
     return 0;
 }

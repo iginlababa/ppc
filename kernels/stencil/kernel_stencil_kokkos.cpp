@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "gpu_compat.h"
 #include "stencil_common.h"
 
 using ExecSpace = Kokkos::DefaultExecutionSpace;
@@ -97,14 +98,14 @@ int main(int argc, char** argv) {
             stencil_cpu_ref(Nv, STENCIL_C0, STENCIL_C1, hIn.data(), hRef.data());
 
             double *dvIn = nullptr, *dvOut = nullptr;
-            cudaMalloc(&dvIn,  bv); cudaMalloc(&dvOut, bv);
-            cudaMemcpy(dvIn, hIn.data(), bv, cudaMemcpyHostToDevice);
-            cudaMemset(dvOut, 0, bv);
+            gpuMalloc(&dvIn,  bv); gpuMalloc(&dvOut, bv);
+            gpuMemcpy(dvIn, hIn.data(), bv, gpuMemcpyHostToDevice);
+            gpuMemset(dvOut, 0, bv);
 
             run_stencil_kokkos(Nv, STENCIL_C0, STENCIL_C1, dvIn, dvOut);
 
-            cudaMemcpy(hOut.data(), dvOut, bv, cudaMemcpyDeviceToHost);
-            cudaFree(dvIn); cudaFree(dvOut);
+            gpuMemcpy(hOut.data(), dvOut, bv, gpuMemcpyDeviceToHost);
+            gpuFree(dvIn); gpuFree(dvOut);
 
             double max_err = 0.0;
             bool ok = stencil_verify(hOut.data(), hRef.data(), Nv, STENCIL_CORRECT_TOL, &max_err);
@@ -123,13 +124,13 @@ int main(int argc, char** argv) {
         init_grid(hIn.data(), N);
 
         double *dIn = nullptr, *dOut = nullptr;
-        if (cudaMalloc(&dIn,  bytes) != cudaSuccess ||
-            cudaMalloc(&dOut, bytes) != cudaSuccess) {
-            std::fprintf(stderr, "cudaMalloc failed for N=%d\n", N);
+        if (gpuMalloc(&dIn,  bytes) != gpuSuccess ||
+            gpuMalloc(&dOut, bytes) != gpuSuccess) {
+            std::fprintf(stderr, "gpuMalloc failed for N=%d\n", N);
             Kokkos::finalize(); return 1;
         }
-        cudaMemcpy(dIn, hIn.data(), bytes, cudaMemcpyHostToDevice);
-        cudaMemset(dOut, 0, bytes);
+        gpuMemcpy(dIn, hIn.data(), bytes, gpuMemcpyHostToDevice);
+        gpuMemset(dOut, 0, bytes);
 
         auto run_once = [&]() {
             run_stencil_kokkos(N, STENCIL_C0, STENCIL_C1, dIn, dOut);
@@ -162,7 +163,7 @@ int main(int argc, char** argv) {
         StencilStats stats = compute_stencil_stats(gbs_vec, flags);
         stencil_print_summary(N, stats, warmup_iters);
 
-        cudaFree(dIn); cudaFree(dOut);
+        gpuFree(dIn); gpuFree(dOut);
     }
     Kokkos::finalize();
     return 0;
