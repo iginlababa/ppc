@@ -277,6 +277,18 @@ build_sycl() {
     if [[ "${VENDOR}" == "nvidia" ]]; then
         sycl_flags="${sycl_flags} -fsycl-targets=nvptx64-nvidia-cuda,spir64"
         sycl_flags="${sycl_flags} -Xsycl-target-backend=nvptx64-nvidia-cuda --cuda-gpu-arch=sm_${CUDA_ARCH}"
+    elif [[ "${VENDOR}" == "amd" ]]; then
+        local hip_arch
+        case "${PLATFORM}" in
+            amd_mi300x) hip_arch="gfx942" ;;
+            amd_mi250x) hip_arch="gfx90a" ;;
+            amd_mi100)  hip_arch="gfx908" ;;
+            *)          hip_arch="${HIP_ARCH:-gfx90a}"
+                        echo "  WARNING: unknown AMD platform '${PLATFORM}', using hip_arch=${hip_arch}" ;;
+        esac
+        # AdaptiveCpp: --acpp-targets tells the compiler which HIP ISA to generate.
+        # Without this, default_selector_v picks CPU or throws sycl::exception.
+        sycl_flags="${sycl_flags} --acpp-targets=hip:${hip_arch}"
     fi
     build_variant "sycl" \
         -DCMAKE_CXX_COMPILER="${sycl_compiler}" \
