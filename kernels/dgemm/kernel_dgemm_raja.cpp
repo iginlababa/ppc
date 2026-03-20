@@ -25,11 +25,18 @@
 #include <vector>
 
 #include "dgemm_common.h"
+#include "gpu_compat.h"
 
 // ── Execution policy ──────────────────────────────────────────────────────────
 // 256 threads per block: flat 1D launch over N*N output elements.
 // Each thread computes one C[row, col] via an O(N) inner loop from global mem.
-using ExecPolicy = RAJA::cuda_exec<256>;
+#ifdef __HIP_PLATFORM_AMD__
+using ExecPolicy    = RAJA::hip_exec<256>;
+using SyncPolicy    = RAJA::hip_synchronize;
+#else
+using ExecPolicy    = RAJA::cuda_exec<256>;
+using SyncPolicy    = RAJA::cuda_synchronize;
+#endif
 
 // ── naïve DGEMM kernel ────────────────────────────────────────────────────────
 void run_dgemm_raja(int N, double alpha, double beta,
@@ -46,7 +53,7 @@ void run_dgemm_raja(int N, double alpha, double beta,
                 sum += d_A[row * N + k] * d_B[k * N + col];
             d_C[idx] = alpha * sum + beta * d_C[idx];
         });
-    RAJA::synchronize<RAJA::cuda_synchronize>();
+    RAJA::synchronize<SyncPolicy>();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -97,15 +104,15 @@ int main(int argc, char** argv) {
         dgemm_cpu_ref(Nv, DGEMM_ALPHA, hAv.data(), hBv.data(), DGEMM_BETA, hRv.data());
 
         double *dvA = nullptr, *dvB = nullptr, *dvC = nullptr;
-        cudaMalloc(&dvA, bv); cudaMalloc(&dvB, bv); cudaMalloc(&dvC, bv);
-        cudaMemcpy(dvA, hAv.data(), bv, cudaMemcpyHostToDevice);
-        cudaMemcpy(dvB, hBv.data(), bv, cudaMemcpyHostToDevice);
-        cudaMemcpy(dvC, hCv.data(), bv, cudaMemcpyHostToDevice);
+        gpuMalloc(&dvA, bv); gpuMalloc(&dvB, bv); gpuMalloc(&dvC, bv);
+        gpuMemcpy(dvA, hAv.data(), bv, gpuMemcpyHostToDevice);
+        gpuMemcpy(dvB, hBv.data(), bv, gpuMemcpyHostToDevice);
+        gpuMemcpy(dvC, hCv.data(), bv, gpuMemcpyHostToDevice);
 
         run_dgemm_raja(Nv, DGEMM_ALPHA, DGEMM_BETA, dvA, dvB, dvC);
 
-        cudaMemcpy(hCv.data(), dvC, bv, cudaMemcpyDeviceToHost);
-        cudaFree(dvA); cudaFree(dvB); cudaFree(dvC);
+        gpuMemcpy(hCv.data(), dvC, bv, gpuMemcpyDeviceToHost);
+        gpuFree(dvA); gpuFree(dvB); gpuFree(dvC);
 
         double max_err = 0.0;
         bool ok = dgemm_verify(hCv.data(), hRv.data(), Nv, DGEMM_CORRECT_TOL, &max_err);
@@ -127,15 +134,15 @@ int main(int argc, char** argv) {
     init_matrix(hB.data(), N);
 
     double *dA = nullptr, *dB = nullptr, *dC = nullptr;
-    if (cudaMalloc(&dA, bytes) != cudaSuccess ||
-        cudaMalloc(&dB, bytes) != cudaSuccess ||
-        cudaMalloc(&dC, bytes) != cudaSuccess) {
-        std::fprintf(stderr, "cudaMalloc failed for N=%d\n", N);
+    if (gpuMalloc(&dA, bytes) != gpuSuccess ||
+        gpuMalloc(&dB, bytes) != gpuSuccess ||
+        gpuMalloc(&dC, bytes) != gpuSuccess) {
+        std::fprintf(stderr, "gpuMalloc failed for N=%d\n", N);
         return 1;
     }
-    cudaMemcpy(dA, hA.data(), bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(dB, hB.data(), bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(dC, hC.data(), bytes, cudaMemcpyHostToDevice);
+    gpuMemcpy(dA, hA.data(), bytes, gpuMemcpyHostToDevice);
+    gpuMemcpy(dB, hB.data(), bytes, gpuMemcpyHostToDevice);
+    gpuMemcpy(dC, hC.data(), bytes, gpuMemcpyHostToDevice);
 
     double alpha = DGEMM_ALPHA, beta = DGEMM_BETA;
     auto run_once = [&]() { run_dgemm_raja(N, alpha, beta, dA, dB, dC); };
@@ -166,6 +173,6 @@ int main(int argc, char** argv) {
     DgemmStats stats = compute_dgemm_stats(gflops_vec, flags);
     dgemm_print_summary(N, stats);
 
-    cudaFree(dA); cudaFree(dB); cudaFree(dC);
+    gpuFree(dA); gpuFree(dB); gpuFree(dC);
     return 0;
 }

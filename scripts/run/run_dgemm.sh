@@ -104,8 +104,8 @@ if [[ "${VENDOR}" == "amd" ]]; then
     BINARY_NAME[native]="dgemm-hip"
     BINARY_MODE[native]="native"
     ALL_ABSTRACTIONS=(native native_rocblas kokkos raja_naive julia_naive julia_rocblas)
-    # Julia must use AMDGPU backend
-    export JULIA_GPU_BACKEND="amd"
+    # Julia must use AMDGPU backend (matches JULIA_GPU_BACKEND convention)
+    export JULIA_GPU_BACKEND="amdgpu"
 fi
 
 # ── Binary finder ─────────────────────────────────────────────────────────────

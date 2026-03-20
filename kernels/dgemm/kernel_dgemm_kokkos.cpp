@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "dgemm_common.h"
+#include "gpu_compat.h"
 
 using ExecSpace   = Kokkos::DefaultExecutionSpace;
 using TeamPol     = Kokkos::TeamPolicy<ExecSpace>;
@@ -31,7 +32,7 @@ void run_dgemm_kokkos(int N, double alpha, double beta,
                        const double* d_A, const double* d_B, double* d_C) {
     constexpr int TILE = DGEMM_TILE;
 
-    // Wrap raw device pointers (cudaMalloc) in unmanaged row-major Views
+    // Wrap raw device pointers (gpuMalloc) in unmanaged row-major Views
     Kokkos::View<const double**, Kokkos::LayoutRight, ExecSpace,
                  Kokkos::MemoryUnmanaged> A(d_A, N, N);
     Kokkos::View<const double**, Kokkos::LayoutRight, ExecSpace,
@@ -148,15 +149,15 @@ int main(int argc, char** argv) {
             dgemm_cpu_ref(Nv, DGEMM_ALPHA, hAv.data(), hBv.data(), DGEMM_BETA, hRv.data());
 
             double *dvA = nullptr, *dvB = nullptr, *dvC = nullptr;
-            cudaMalloc(&dvA, bv); cudaMalloc(&dvB, bv); cudaMalloc(&dvC, bv);
-            cudaMemcpy(dvA, hAv.data(), bv, cudaMemcpyHostToDevice);
-            cudaMemcpy(dvB, hBv.data(), bv, cudaMemcpyHostToDevice);
-            cudaMemcpy(dvC, hCv.data(), bv, cudaMemcpyHostToDevice);
+            gpuMalloc(&dvA, bv); gpuMalloc(&dvB, bv); gpuMalloc(&dvC, bv);
+            gpuMemcpy(dvA, hAv.data(), bv, gpuMemcpyHostToDevice);
+            gpuMemcpy(dvB, hBv.data(), bv, gpuMemcpyHostToDevice);
+            gpuMemcpy(dvC, hCv.data(), bv, gpuMemcpyHostToDevice);
 
             run_dgemm_kokkos(Nv, DGEMM_ALPHA, DGEMM_BETA, dvA, dvB, dvC);
 
-            cudaMemcpy(hCv.data(), dvC, bv, cudaMemcpyDeviceToHost);
-            cudaFree(dvA); cudaFree(dvB); cudaFree(dvC);
+            gpuMemcpy(hCv.data(), dvC, bv, gpuMemcpyDeviceToHost);
+            gpuFree(dvA); gpuFree(dvB); gpuFree(dvC);
 
             double max_err = 0.0;
             bool ok = dgemm_verify(hCv.data(), hRv.data(), Nv, DGEMM_CORRECT_TOL, &max_err);
@@ -182,16 +183,16 @@ int main(int argc, char** argv) {
         // Allocate device memory (raw CUDA — keeps memory management consistent
         // with other abstraction benchmarks)
         double *dA = nullptr, *dB = nullptr, *dC = nullptr;
-        if (cudaMalloc(&dA, bytes) != cudaSuccess ||
-            cudaMalloc(&dB, bytes) != cudaSuccess ||
-            cudaMalloc(&dC, bytes) != cudaSuccess) {
-            std::fprintf(stderr, "cudaMalloc failed for N=%d\n", N);
+        if (gpuMalloc(&dA, bytes) != gpuSuccess ||
+            gpuMalloc(&dB, bytes) != gpuSuccess ||
+            gpuMalloc(&dC, bytes) != gpuSuccess) {
+            std::fprintf(stderr, "gpuMalloc failed for N=%d\n", N);
             Kokkos::finalize();
             return 1;
         }
-        cudaMemcpy(dA, hA.data(), bytes, cudaMemcpyHostToDevice);
-        cudaMemcpy(dB, hB.data(), bytes, cudaMemcpyHostToDevice);
-        cudaMemcpy(dC, hC.data(), bytes, cudaMemcpyHostToDevice);
+        gpuMemcpy(dA, hA.data(), bytes, gpuMemcpyHostToDevice);
+        gpuMemcpy(dB, hB.data(), bytes, gpuMemcpyHostToDevice);
+        gpuMemcpy(dC, hC.data(), bytes, gpuMemcpyHostToDevice);
 
         double alpha = DGEMM_ALPHA, beta = DGEMM_BETA;
 
@@ -225,7 +226,7 @@ int main(int argc, char** argv) {
         DgemmStats stats = compute_dgemm_stats(gflops_vec, flags);
         dgemm_print_summary(N, stats);
 
-        cudaFree(dA); cudaFree(dB); cudaFree(dC);
+        gpuFree(dA); gpuFree(dB); gpuFree(dC);
     }
     Kokkos::finalize();
     return 0;

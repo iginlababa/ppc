@@ -4,35 +4,68 @@
 # E2 DESIGN DECISIONS
 # [D2-Julia] --mode naive: simple GPU kernel, no shared memory, column-major arrays.
 #   Julia's natural layout. Each thread computes one C[row,col] via O(N) inner
-#   loop from global memory. Expected behavior: memory-bandwidth-limited, similar
-#   to raja_naive, exposing the no-tiling penalty.
+#   loop from global memory. Memory-bandwidth-limited, same no-tiling penalty
+#   as raja_naive.
 # [D5-Julia] --mode cublas / --mode rocblas: library ceiling reference.
 #   Uses Julia's column-major GPU arrays directly — no transpose tricks needed.
 # [D3] alpha=1.0, beta=0.0.
 # [D7] experiment_id: dgemm_julia_{naive|cublas|rocblas}_{platform}_{size}_n{N}_{run:03d}
 #
 # Backend selection: JULIA_GPU_BACKEND env var (default: "cuda")
-#   cuda → CUDA.jl + CUBLAS   (--mode naive|cublas)
-#   amd  → AMDGPU.jl + rocBLAS (--mode naive|rocblas)
+#   cuda   → CUDA.jl + CUBLAS  (--mode naive|cublas)
+#   amdgpu → AMDGPU.jl + rocBLAS (--mode naive|rocblas)
 
-const BACKEND = get(ENV, "JULIA_GPU_BACKEND", "cuda")
+const BACKEND = lowercase(get(ENV, "JULIA_GPU_BACKEND", "cuda"))
 
-if BACKEND == "amd"
+if BACKEND == "amdgpu"
     using AMDGPU
     import AMDGPU.rocBLAS
-    gpu_rand(T, dims...)   = AMDGPU.rand(T, dims...)
-    gpu_zeros(T, dims...)  = AMDGPU.zeros(T, dims...)
-    gpu_synchronize()      = AMDGPU.synchronize()
-    to_gpu(x)              = ROCArray(x)
-    from_gpu(x)            = Array(x)
-else  # "cuda"
+    const GPUArray = ROCArray
+    gpu_rand(T, dims...)  = AMDGPU.rand(T, dims...)
+    gpu_zeros(T, dims...) = AMDGPU.zeros(T, dims...)
+    gpu_sync()            = AMDGPU.synchronize()
+    to_gpu(x)             = ROCArray(x)
+    from_gpu(x)           = Array(x)
+    # Backend-agnostic intrinsic wrappers for use inside kernel bodies.
+    # AMDGPU uses workitemIdx/workgroupIdx/workgroupDim (OpenCL naming).
+    @inline _threadIdx() = workitemIdx()
+    @inline _blockIdx()  = workgroupIdx()
+    @inline _blockDim()  = workgroupDim()
+    # @roc macro needs @eval so it is resolved after AMDGPU is imported
+    @eval function _gpu_launch!(C_d, A_d, B_d, alpha, beta, N32, threads, blocks)
+        @roc groupsize=threads gridsize=blocks dgemm_naive_kernel!(
+            C_d, A_d, B_d, alpha, beta, N32)
+    end
+    function _gpu_blas_gemm!(A_d, B_d, C_d, alpha, beta)
+        rocBLAS.gemm!('N', 'N', alpha, A_d, B_d, beta, C_d)
+    end
+    const BLAS_MODE = "rocblas"
+
+elseif BACKEND == "cuda"
     using CUDA
     import CUDA.CUBLAS
-    gpu_rand(T, dims...)   = CUDA.rand(T, dims...)
-    gpu_zeros(T, dims...)  = CUDA.zeros(T, dims...)
-    gpu_synchronize()      = CUDA.synchronize()
-    to_gpu(x)              = CuArray(x)
-    from_gpu(x)            = Array(x)
+    const GPUArray = CuArray
+    gpu_rand(T, dims...)  = CUDA.rand(T, dims...)
+    gpu_zeros(T, dims...) = CUDA.zeros(T, dims...)
+    gpu_sync()            = CUDA.synchronize()
+    to_gpu(x)             = CuArray(x)
+    from_gpu(x)           = Array(x)
+    # CUDA.jl exports threadIdx/blockIdx/blockDim with CUDA naming.
+    @inline _threadIdx() = threadIdx()
+    @inline _blockIdx()  = blockIdx()
+    @inline _blockDim()  = blockDim()
+    # @cuda macro needs @eval for the same reason
+    @eval function _gpu_launch!(C_d, A_d, B_d, alpha, beta, N32, threads, blocks)
+        @cuda threads=threads blocks=blocks dgemm_naive_kernel!(
+            C_d, A_d, B_d, alpha, beta, N32)
+    end
+    function _gpu_blas_gemm!(A_d, B_d, C_d, alpha, beta)
+        CUBLAS.gemm!('N', 'N', alpha, A_d, B_d, beta, C_d)
+    end
+    const BLAS_MODE = "cublas"
+
+else
+    error("JULIA_GPU_BACKEND=$(BACKEND) not recognised — set to 'cuda' or 'amdgpu'")
 end
 
 using Printf: @printf
@@ -40,9 +73,8 @@ using Statistics: median, mean, quantile
 
 # ── Naive kernel: one thread per output element ───────────────────────────────
 function dgemm_naive_kernel!(C, A, B, alpha::Float64, beta::Float64, N::Int32)
-    row = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
-    col = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
-
+    row = (_blockIdx().x - Int32(1)) * _blockDim().x + _threadIdx().x
+    col = (_blockIdx().y - Int32(1)) * _blockDim().y + _threadIdx().y
     if row <= N && col <= N
         acc = 0.0
         for k = Int32(1):N
@@ -51,24 +83,6 @@ function dgemm_naive_kernel!(C, A, B, alpha::Float64, beta::Float64, N::Int32)
         @inbounds C[row, col] = alpha * acc + beta * C[row, col]
     end
     return nothing
-end
-
-function launch_naive_kernel!(C_d, A_d, B_d, alpha, beta, N32, threads, blocks)
-    if BACKEND == "amd"
-        @roc groupsize=threads gridsize=blocks dgemm_naive_kernel!(
-            C_d, A_d, B_d, alpha, beta, N32)
-    else
-        @cuda threads=threads blocks=blocks dgemm_naive_kernel!(
-            C_d, A_d, B_d, alpha, beta, N32)
-    end
-end
-
-function blas_gemm!(A_d, B_d, C_d, alpha, beta)
-    if BACKEND == "amd"
-        rocBLAS.gemm!('N', 'N', alpha, A_d, B_d, beta, C_d)
-    else
-        CUBLAS.gemm!('N', 'N', alpha, A_d, B_d, beta, C_d)
-    end
 end
 
 # ── GFLOP/s formula ───────────────────────────────────────────────────────────
@@ -85,7 +99,6 @@ end
 
 # ── Run one timed experiment ──────────────────────────────────────────────────
 function run_dgemm(mode::String, N::Int, warmup::Int, reps::Int, platform::String)
-    blas_mode = BACKEND == "amd" ? "rocblas" : "cublas"
     @printf("# abstraction=julia_%s backend=%s N=%d warmup=%d reps=%d platform=%s\n",
             mode, BACKEND, N, warmup, reps, platform)
 
@@ -100,15 +113,15 @@ function run_dgemm(mode::String, N::Int, warmup::Int, reps::Int, platform::Strin
     beta    = 0.0
     N32     = Int32(N)
 
-    run_once = if mode == blas_mode
+    run_once = if mode == BLAS_MODE
         () -> begin
-            blas_gemm!(A_d, B_d, C_d, alpha, beta)
-            gpu_synchronize()
+            _gpu_blas_gemm!(A_d, B_d, C_d, alpha, beta)
+            gpu_sync()
         end
     else  # naive
         () -> begin
-            launch_naive_kernel!(C_d, A_d, B_d, alpha, beta, N32, threads, blocks)
-            gpu_synchronize()
+            _gpu_launch!(C_d, A_d, B_d, alpha, beta, N32, threads, blocks)
+            gpu_sync()
         end
     end
 
@@ -116,7 +129,7 @@ function run_dgemm(mode::String, N::Int, warmup::Int, reps::Int, platform::Strin
     for _ in 1:warmup
         run_once()
     end
-    gpu_synchronize()
+    gpu_sync()
 
     # Timed runs
     gflops_vec = Float64[]
@@ -160,7 +173,7 @@ function main()
     warmup   = 50
     reps     = 30
     platform = "unknown"
-    mode     = "naive"   # naive | cublas | rocblas
+    mode     = "naive"
     verify   = false
 
     args = ARGS
@@ -178,9 +191,8 @@ function main()
         end
     end
 
-    blas_mode = BACKEND == "amd" ? "rocblas" : "cublas"
-    if mode ∉ ("naive", blas_mode)
-        @error "--mode must be naive or $(blas_mode) for BACKEND=$(BACKEND)"
+    if mode ∉ ("naive", BLAS_MODE)
+        @error "--mode must be naive or $(BLAS_MODE) for BACKEND=$(BACKEND)"
         exit(1)
     end
 
@@ -189,28 +201,27 @@ function main()
         Nv      = 128
         hAv     = [1.0 / Float64(i + j) for i in 1:Nv, j in 1:Nv]
         hBv     = [1.0 / Float64(i + j) for i in 1:Nv, j in 1:Nv]
-        hRv     = hAv * hBv   # CPU reference (column-major, alpha=1, beta=0)
+        hRv     = hAv * hBv
 
         A_d = to_gpu(hAv)
         B_d = to_gpu(hBv)
         C_d = gpu_zeros(Float64, Nv, Nv)
         tile = 32
         alpha_v = 1.0; beta_v = 0.0; Nv32 = Int32(Nv)
-        if mode == blas_mode
-            blas_gemm!(A_d, B_d, C_d, alpha_v, beta_v)
+        if mode == BLAS_MODE
+            _gpu_blas_gemm!(A_d, B_d, C_d, alpha_v, beta_v)
         else
             vth = (tile, tile)
             vbk = (cld(Nv, tile), cld(Nv, tile))
-            launch_naive_kernel!(C_d, A_d, B_d, alpha_v, beta_v, Nv32, vth, vbk)
+            _gpu_launch!(C_d, A_d, B_d, alpha_v, beta_v, Nv32, vth, vbk)
         end
-        gpu_synchronize()
+        gpu_sync()
         hCv = from_gpu(C_d)
 
         max_err = maximum(abs.(hCv .- hRv) ./ max.(abs.(hRv), 1e-12))
         ok = max_err < 1e-6
-        pass_str = ok ? "PASS" : "FAIL"
         @printf("VERIFY abstraction=julia_%s backend=%s N=%d max_rel_err=%.2e %s\n",
-                mode, BACKEND, Nv, max_err, pass_str)
+                mode, BACKEND, Nv, max_err, ok ? "PASS" : "FAIL")
         if !ok
             @error "[E2 verify] julia_$(mode) FAILED — aborting before timing."
             exit(1)

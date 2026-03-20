@@ -344,12 +344,12 @@ build_julia() {
     julia_ver="$("${julia_bin}" --version 2>/dev/null | awk '{print $3}')"
     echo "  julia ${julia_ver} found at $(command -v "${julia_bin}")"
 
-    local extra_cmake=()
-    if [[ "${VENDOR}" == "amd" ]]; then
-        extra_cmake+=(-DDGEMM_ENABLE_HIP=OFF)   # Julia uses its own GPU runtime
-    fi
-
-    build_variant "julia" -DDGEMM_ENABLE_JULIA=ON "${extra_cmake[@]}"
+    # Julia uses its own GPU runtime — disable C++ GPU abstractions entirely
+    # to avoid picking up Kokkos/RAJA installed with HIP flags on AMD machines.
+    build_variant "julia" -DDGEMM_ENABLE_JULIA=ON \
+        -DDGEMM_ENABLE_HIP=OFF \
+        -DCMAKE_DISABLE_FIND_PACKAGE_Kokkos=ON \
+        -DCMAKE_DISABLE_FIND_PACKAGE_RAJA=ON
     chmod +x "${BUILD_BASE}/julia_${PLATFORM}/dgemm-julia" 2>/dev/null || true
 
     # Instantiate Julia project — downloads CUDA.jl and/or AMDGPU.jl
