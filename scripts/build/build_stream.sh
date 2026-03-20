@@ -262,18 +262,29 @@ build_raja() {
 
 build_sycl() {
     local sycl_compiler=""
-    for c in icpx clang++ acpp; do
-        if command -v "${c}" &>/dev/null; then
-            sycl_compiler="${c}"
-            break
+    if [[ "${VENDOR}" == "amd" ]]; then
+        # AMD requires AdaptiveCpp (acpp); other SYCL compilers don't understand
+        # --acpp-targets and would be selected by the generic probe below first.
+        if ! command -v acpp &>/dev/null; then
+            echo "  SKIP sycl: acpp not found. Install AdaptiveCpp (/opt/adaptivecpp)."
+            return
         fi
-    done
+        sycl_compiler="acpp"
+    else
+        for c in icpx clang++ acpp; do
+            if command -v "${c}" &>/dev/null; then
+                sycl_compiler="${c}"
+                break
+            fi
+        done
+    fi
     if [[ -z "${sycl_compiler}" ]]; then
         echo "  SKIP sycl: no SYCL compiler found (icpx / clang++ / acpp)."
         echo "        Source the Intel oneAPI environment or install AdaptiveCpp."
         return
     fi
     local sycl_flags="-fsycl"
+    local sycl_extra_cmake=()
     if [[ "${VENDOR}" == "nvidia" ]]; then
         sycl_flags="${sycl_flags} -fsycl-targets=nvptx64-nvidia-cuda,spir64"
         sycl_flags="${sycl_flags} -Xsycl-target-backend=nvptx64-nvidia-cuda --cuda-gpu-arch=sm_${CUDA_ARCH}"
@@ -286,13 +297,21 @@ build_sycl() {
             *)          hip_arch="${HIP_ARCH:-gfx90a}"
                         echo "  WARNING: unknown AMD platform '${PLATFORM}', using hip_arch=${hip_arch}" ;;
         esac
-        # AdaptiveCpp: --acpp-targets tells the compiler which HIP ISA to generate.
-        # Without this, default_selector_v picks CPU or throws sycl::exception.
-        sycl_flags="${sycl_flags} --acpp-targets=hip:${hip_arch}"
+        # AdaptiveCpp does not use -fsycl (Intel DPC++ flag); replace entirely.
+        # --acpp-targets tells acpp which HIP ISA to generate; without it,
+        # default_selector_v picks CPU or throws sycl::exception.
+        sycl_flags="--acpp-targets=hip:${hip_arch}"
+        # acpp with HIP targets rejects -pthread; RAJA's/Kokkos's cmake internally
+        # calls find_package(Threads REQUIRED) which fails, and Kokkos would try
+        # to link with system lld that lacks AMD intrinsics.  Disable both —
+        # neither is needed when building the SYCL abstraction.
+        sycl_extra_cmake+=(-DCMAKE_DISABLE_FIND_PACKAGE_RAJA=ON)
+        sycl_extra_cmake+=(-DCMAKE_DISABLE_FIND_PACKAGE_Kokkos=ON)
     fi
     build_variant "sycl" \
         -DCMAKE_CXX_COMPILER="${sycl_compiler}" \
         -DSTREAM_ENABLE_SYCL=ON \
+        "${sycl_extra_cmake[@]}" \
         "-DSYCL_FLAGS=${sycl_flags}"
 }
 

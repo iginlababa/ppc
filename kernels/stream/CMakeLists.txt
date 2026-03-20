@@ -3,7 +3,8 @@ cmake_minimum_required(VERSION 3.20)
 # HIP-only builds (AMD) must not require the CUDA toolkit.
 # -DSTREAM_ENABLE_HIP=ON is set in the cache before project() runs, so this
 # check correctly skips the CUDA language when hipcc is the sole compiler.
-if(DEFINED STREAM_ENABLE_HIP AND STREAM_ENABLE_HIP)
+if((DEFINED STREAM_ENABLE_HIP AND STREAM_ENABLE_HIP) OR
+   (DEFINED STREAM_ENABLE_SYCL AND STREAM_ENABLE_SYCL))
     project(stream_kernels LANGUAGES CXX)
 else()
     project(stream_kernels LANGUAGES CXX CUDA)
@@ -56,7 +57,8 @@ option(STREAM_USE_FLOAT "Use single precision (default: double)" OFF)
 
 # ── CUDA native baseline (abstraction=native on NVIDIA) ──────────────────────
 # Skipped when building HIP-only (AMD): no CUDA language is enabled.
-if(NOT (DEFINED STREAM_ENABLE_HIP AND STREAM_ENABLE_HIP))
+if(NOT (DEFINED STREAM_ENABLE_HIP AND STREAM_ENABLE_HIP) AND
+   NOT (DEFINED STREAM_ENABLE_SYCL AND STREAM_ENABLE_SYCL))
     add_executable(stream-cuda kernel_stream_cuda.cu)
 
     target_include_directories(stream-cuda PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -259,9 +261,16 @@ if(STREAM_ENABLE_SYCL)
     add_executable(stream-sycl kernel_stream_sycl.cpp)
     target_include_directories(stream-sycl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-    # Base SYCL flag — works for DPC++ (icpx/clang++) and AdaptiveCpp (acpp)
-    target_compile_options(stream-sycl PRIVATE -O3 -Wall -Wextra -fsycl)
-    target_link_options(stream-sycl PRIVATE -fsycl)
+    # Base SYCL flag — required for DPC++ (icpx/clang++) but rejected by AdaptiveCpp (acpp).
+    # Detect acpp by compiler name; acpp manages SYCL translation via --acpp-targets instead.
+    get_filename_component(_sycl_compiler_name "${CMAKE_CXX_COMPILER}" NAME)
+    if(_sycl_compiler_name MATCHES "acpp")
+        message(STATUS "  SYCL: AdaptiveCpp compiler detected — omitting -fsycl (use --acpp-targets in SYCL_FLAGS)")
+        target_compile_options(stream-sycl PRIVATE -O3 -Wall -Wextra)
+    else()
+        target_compile_options(stream-sycl PRIVATE -O3 -Wall -Wextra -fsycl)
+        target_link_options(stream-sycl PRIVATE -fsycl)
+    endif()
 
     # Extra backend-targeting flags (e.g. -fsycl-targets=nvptx64-nvidia-cuda)
     if(SYCL_FLAGS)
