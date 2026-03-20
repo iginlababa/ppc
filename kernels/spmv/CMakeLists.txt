@@ -4,54 +4,82 @@ project(e4_spmv LANGUAGES CXX)
 # ── E4 DESIGN DECISIONS ───────────────────────────────────────────────────────
 # [D3] One thread per row. No warp-per-row optimization — honest baseline.
 # [D7] Adaptive warmup logic is inside each kernel binary.
-# CUDA always built (native spmv). Kokkos/RAJA conditional on find_package.
-# SYCL: conditional on -DSPMV_ENABLE_SYCL=ON.
+# HIP: conditional on -DSPMV_ENABLE_HIP=ON; disables CUDA language entirely.
+# CUDA: built when HIP not requested.
+# SYCL: conditional on -DSPMV_ENABLE_SYCL=ON; detects acpp vs icpx/clang++.
+# Kokkos/RAJA: conditional on find_package.
 # ─────────────────────────────────────────────────────────────────────────────
 
-option(SPMV_ENABLE_SYCL  "Build SYCL spmv target"    OFF)
-option(SPMV_ENABLE_JULIA "Build Julia spmv wrapper"   ON)
-option(SPMV_ENABLE_NUMBA "Build Numba spmv wrapper"   ON)
+option(SPMV_ENABLE_HIP   "Build HIP spmv target (AMD/ROCm)"  OFF)
+option(SPMV_ENABLE_SYCL  "Build SYCL spmv target"            OFF)
+option(SPMV_ENABLE_JULIA "Build Julia spmv wrapper"           ON)
+option(SPMV_ENABLE_NUMBA "Build Numba spmv wrapper"           ON)
 
-# ── CUDA ──────────────────────────────────────────────────────────────────────
-if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
-    find_program(_GXX g++)
-    if(_GXX)
-        set(CMAKE_CUDA_HOST_COMPILER "${_GXX}" CACHE STRING "")
+# ── CUDA (skipped when HIP requested) ─────────────────────────────────────────
+if(NOT SPMV_ENABLE_HIP)
+    if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
+        find_program(_GXX g++)
+        if(_GXX)
+            set(CMAKE_CUDA_HOST_COMPILER "${_GXX}" CACHE STRING "")
+        endif()
     endif()
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    set(_SPMV_HAVE_CUDA TRUE)
+else()
+    set(_SPMV_HAVE_CUDA FALSE)
 endif()
-enable_language(CUDA)
-find_package(CUDAToolkit REQUIRED)
 
 set(SPMV_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
-# ── spmv-cuda (native baseline) ───────────────────────────────────────────────
-add_executable(spmv-cuda kernel_spmv_cuda.cu)
-target_include_directories(spmv-cuda PRIVATE ${SPMV_INCLUDE_DIR})
-target_link_libraries(spmv-cuda PRIVATE CUDA::cudart)
-target_compile_options(spmv-cuda PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:
-        -O3 --use_fast_math --generate-line-info
-        --expt-extended-lambda --expt-relaxed-constexpr
-        -Xcompiler=-Wall,-Wextra>)
-set_target_properties(spmv-cuda PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
+# ── spmv-cuda (native baseline, NVIDIA) ───────────────────────────────────────
+if(_SPMV_HAVE_CUDA)
+    add_executable(spmv-cuda kernel_spmv_cuda.cu)
+    target_include_directories(spmv-cuda PRIVATE ${SPMV_INCLUDE_DIR})
+    target_link_libraries(spmv-cuda PRIVATE CUDA::cudart)
+    target_compile_options(spmv-cuda PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:
+            -O3 --use_fast_math --generate-line-info
+            --expt-extended-lambda --expt-relaxed-constexpr
+            -Xcompiler=-Wall,-Wextra>)
+    set_target_properties(spmv-cuda PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
+endif()
+
+# ── spmv-hip (native baseline, AMD) ───────────────────────────────────────────
+if(SPMV_ENABLE_HIP)
+    find_package(hip REQUIRED)
+    add_executable(spmv-hip kernel_spmv_hip.cpp)
+    target_include_directories(spmv-hip PRIVATE ${SPMV_INCLUDE_DIR})
+    target_link_libraries(spmv-hip PRIVATE hip::device)
+    target_compile_options(spmv-hip PRIVATE -O3 -ffast-math -Wall -Wextra)
+endif()
 
 # ── spmv-kokkos ───────────────────────────────────────────────────────────────
 find_package(Kokkos QUIET)
 if(Kokkos_FOUND)
     get_target_property(_kokkos_iface Kokkos::kokkos INTERFACE_LINK_LIBRARIES)
-    if("cuda" IN_LIST _kokkos_iface OR "CUDA::cudart" IN_LIST _kokkos_iface)
-        set_source_files_properties(kernel_spmv_kokkos.cpp PROPERTIES LANGUAGE CUDA)
-        message(STATUS "  SpMV: Kokkos CUDA backend — compiling as CUDA TU")
+    if(_SPMV_HAVE_CUDA)
+        if("cuda" IN_LIST _kokkos_iface OR "CUDA::cudart" IN_LIST _kokkos_iface)
+            set_source_files_properties(kernel_spmv_kokkos.cpp PROPERTIES LANGUAGE CUDA)
+            message(STATUS "  SpMV: Kokkos CUDA backend — compiling as CUDA TU")
+        endif()
+    elseif(SPMV_ENABLE_HIP)
+        message(STATUS "  SpMV: Kokkos HIP backend — compiling as CXX")
     endif()
     add_executable(spmv-kokkos kernel_spmv_kokkos.cpp)
     target_include_directories(spmv-kokkos PRIVATE ${SPMV_INCLUDE_DIR})
-    target_link_libraries(spmv-kokkos PRIVATE Kokkos::kokkos CUDA::cudart)
-    target_compile_options(spmv-kokkos PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-O3 -Wall -Wextra>
-        $<$<COMPILE_LANGUAGE:CUDA>:
-            -O3 --use_fast_math --generate-line-info
-            --expt-extended-lambda --expt-relaxed-constexpr
-            -Xcompiler=-Wall,-Wextra>)
+    if(_SPMV_HAVE_CUDA)
+        target_link_libraries(spmv-kokkos PRIVATE Kokkos::kokkos CUDA::cudart)
+        target_compile_options(spmv-kokkos PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:-O3 -Wall -Wextra>
+            $<$<COMPILE_LANGUAGE:CUDA>:
+                -O3 --use_fast_math --generate-line-info
+                --expt-extended-lambda --expt-relaxed-constexpr
+                -Xcompiler=-Wall,-Wextra>)
+    else()
+        target_link_libraries(spmv-kokkos PRIVATE Kokkos::kokkos hip::device)
+        target_compile_options(spmv-kokkos PRIVATE -O3 -Wall -Wextra)
+    endif()
 else()
     message(STATUS "  SpMV: Kokkos not found — skipping spmv-kokkos")
 endif()
@@ -60,20 +88,29 @@ endif()
 find_package(RAJA QUIET)
 if(RAJA_FOUND)
     get_target_property(_raja_iface RAJA INTERFACE_LINK_LIBRARIES)
-    if("cuda" IN_LIST _raja_iface OR "CUDA::cudart" IN_LIST _raja_iface)
-        set_source_files_properties(kernel_spmv_raja.cpp PROPERTIES LANGUAGE CUDA)
-        message(STATUS "  SpMV: RAJA CUDA backend — compiling as CUDA TU")
+    if(_SPMV_HAVE_CUDA)
+        if("cuda" IN_LIST _raja_iface OR "CUDA::cudart" IN_LIST _raja_iface)
+            set_source_files_properties(kernel_spmv_raja.cpp PROPERTIES LANGUAGE CUDA)
+            message(STATUS "  SpMV: RAJA CUDA backend — compiling as CUDA TU")
+        endif()
+    elseif(SPMV_ENABLE_HIP)
+        message(STATUS "  SpMV: RAJA HIP backend — compiling as CXX")
     endif()
     add_executable(spmv-raja kernel_spmv_raja.cpp)
     target_include_directories(spmv-raja PRIVATE ${SPMV_INCLUDE_DIR})
-    target_link_libraries(spmv-raja PRIVATE RAJA CUDA::cudart)
-    target_compile_options(spmv-raja PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-O3 -Wall -Wextra>
-        $<$<COMPILE_LANGUAGE:CUDA>:
-            -O3 --use_fast_math --generate-line-info
-            --expt-extended-lambda --expt-relaxed-constexpr
-            -allow-unsupported-compiler
-            -Xcompiler=-Wall,-Wextra>)
+    if(_SPMV_HAVE_CUDA)
+        target_link_libraries(spmv-raja PRIVATE RAJA CUDA::cudart)
+        target_compile_options(spmv-raja PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:-O3 -Wall -Wextra>
+            $<$<COMPILE_LANGUAGE:CUDA>:
+                -O3 --use_fast_math --generate-line-info
+                --expt-extended-lambda --expt-relaxed-constexpr
+                -allow-unsupported-compiler
+                -Xcompiler=-Wall,-Wextra>)
+    else()
+        target_link_libraries(spmv-raja PRIVATE RAJA hip::device)
+        target_compile_options(spmv-raja PRIVATE -O3 -Wall -Wextra)
+    endif()
 else()
     # Fallback: direct path compilation
     if(NOT DEFINED RAJA_INSTALL_PREFIX)
@@ -110,13 +147,15 @@ endif()
 
 # ── spmv-sycl ─────────────────────────────────────────────────────────────────
 if(SPMV_ENABLE_SYCL)
-    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|IntelLLVM")
-        message(WARNING "  SpMV SYCL: compiler may not support -fsycl.")
-    endif()
     add_executable(spmv-sycl kernel_spmv_sycl.cpp)
     target_include_directories(spmv-sycl PRIVATE ${SPMV_INCLUDE_DIR})
-    target_compile_options(spmv-sycl PRIVATE -fsycl -O3)
-    target_link_options(spmv-sycl PRIVATE -fsycl)
+    # AdaptiveCpp (acpp/syclcc) uses --acpp-targets instead of -fsycl
+    if(CMAKE_CXX_COMPILER MATCHES "acpp|syclcc")
+        target_compile_options(spmv-sycl PRIVATE -O3)
+    else()
+        target_compile_options(spmv-sycl PRIVATE -fsycl -O3)
+        target_link_options(spmv-sycl PRIVATE -fsycl)
+    endif()
     if(DEFINED SYCL_FLAGS)
         separate_arguments(_sycl_flags UNIX_COMMAND "${SYCL_FLAGS}")
         target_compile_options(spmv-sycl PRIVATE ${_sycl_flags})
@@ -162,7 +201,12 @@ endif()
 # ── Summary ───────────────────────────────────────────────────────────────────
 message(STATUS "")
 message(STATUS "E4 SpMV build summary:")
-message(STATUS "  spmv-cuda    → always (native CSR, one thread per row)")
+if(_SPMV_HAVE_CUDA)
+    message(STATUS "  spmv-cuda    → native CSR, one thread per row (CUDA)")
+endif()
+if(SPMV_ENABLE_HIP)
+    message(STATUS "  spmv-hip     → native CSR, one thread per row (HIP/AMD)")
+endif()
 if(Kokkos_FOUND)
     message(STATUS "  spmv-kokkos  → RangePolicy over rows")
 endif()

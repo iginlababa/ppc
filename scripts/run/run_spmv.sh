@@ -55,49 +55,44 @@ SIZES[large]=32768
 # ── Matrix types (D2) ─────────────────────────────────────────────────────────
 ALL_MATRICES=(laplacian_2d random_sparse power_law)
 
+# ── Platform vendor ───────────────────────────────────────────────────────────
+VENDOR="${PLATFORM%%_*}"   # "nvidia" or "amd"
+
 # ── Abstraction registry ──────────────────────────────────────────────────────
 declare -A BINARY_NAME   # abstraction → executable stem
+declare -A BINARY_DIR    # abstraction → build subdirectory prefix
 declare -A CSV_LABEL     # abstraction → label written to CSV
 
-BINARY_NAME[native]="spmv-cuda"
+if [[ "${VENDOR}" == "amd" ]]; then
+    BINARY_NAME[native]="spmv-hip"
+    BINARY_DIR[native]="hip"
+    ALL_ABSTRACTIONS=(native kokkos raja sycl julia)
+    # Set AMDGPU backend for Julia
+    export JULIA_GPU_BACKEND="amdgpu"
+else
+    BINARY_NAME[native]="spmv-cuda"
+    BINARY_DIR[native]="cuda"
+    ALL_ABSTRACTIONS=(native kokkos raja sycl julia numba)
+fi
+
 CSV_LABEL[native]="native"
 
-BINARY_NAME[kokkos]="spmv-kokkos"
-CSV_LABEL[kokkos]="kokkos"
-
-BINARY_NAME[raja]="spmv-raja"
-CSV_LABEL[raja]="raja"
-
-BINARY_NAME[sycl]="spmv-sycl"
-CSV_LABEL[sycl]="sycl"
-
-BINARY_NAME[julia]="spmv-julia"
-CSV_LABEL[julia]="julia"
-
-BINARY_NAME[numba]="spmv-numba"
-CSV_LABEL[numba]="numba"
-
-ALL_ABSTRACTIONS=(native kokkos raja sycl julia numba)
+BINARY_NAME[kokkos]="spmv-kokkos";  BINARY_DIR[kokkos]="kokkos"; CSV_LABEL[kokkos]="kokkos"
+BINARY_NAME[raja]="spmv-raja";      BINARY_DIR[raja]="raja";     CSV_LABEL[raja]="raja"
+BINARY_NAME[sycl]="spmv-sycl";      BINARY_DIR[sycl]="sycl";     CSV_LABEL[sycl]="sycl"
+BINARY_NAME[julia]="spmv-julia";    BINARY_DIR[julia]="julia";   CSV_LABEL[julia]="julia"
+BINARY_NAME[numba]="spmv-numba";    BINARY_DIR[numba]="numba";   CSV_LABEL[numba]="numba"
 
 # ── Binary finder ─────────────────────────────────────────────────────────────
 find_binary() {
     local abs="$1"
     local bin_name="${BINARY_NAME[$abs]}"
-    local dir_stem
-    case "${abs}" in
-        native)  dir_stem="cuda"   ;;
-        kokkos)  dir_stem="kokkos" ;;
-        raja)    dir_stem="raja"   ;;
-        sycl)    dir_stem="sycl"   ;;
-        julia)   dir_stem="julia"  ;;
-        numba)   dir_stem="numba"  ;;
-        *)       dir_stem="${abs}" ;;
-    esac
+    local dir_stem="${BINARY_DIR[$abs]:-${abs}}"
 
     local p="${BUILD_BASE}/${dir_stem}_${PLATFORM}/${bin_name}"
     [[ -x "${p}" ]] && { echo "${p}"; return 0; }
 
-    # Also search all build subdirs (platform-agnostic fallback)
+    # Platform-agnostic fallback: search all build subdirs
     local best=""
     for d in "${BUILD_BASE}"/*/; do
         if [[ -x "${d}${bin_name}" ]]; then

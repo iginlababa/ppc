@@ -2,9 +2,10 @@
 """
 E4 SpMV — data processing pipeline.
 
-Loads raw per-abstraction CSVs, filters clean runs (hw_state_verified=1),
-computes per-(matrix_type, size) statistics and efficiency relative to native baseline,
-flags configurations for deep profiling, saves data/processed/e4_spmv_summary.csv.
+Loads raw per-abstraction CSVs for all platforms, filters clean runs
+(hw_state_verified=1), computes per-(platform, matrix_type, size) statistics
+and efficiency relative to native baseline, flags configurations for deep
+profiling, saves data/processed/e4_spmv_summary.csv.
 
 E4 DESIGN DECISIONS
 [D1] Problem sizes: small=1024 rows, medium=8192 rows, large=32768 rows.
@@ -15,6 +16,7 @@ E4 DESIGN DECISIONS
 [D7] Amended warmup: adaptive CV<2% — no fixed WARMUP_DROP needed since the
      kernel itself discards the warmup phase before emitting run_id rows.
 [D6] experiment_id: spmv_{abstraction}_{platform}_{matrix}_{size_label}_n{N}_{run_id:03d}
+[D8] Multi-platform: PLATFORM_CONFIGS dict mirrors E3 process_e3.py structure.
 Measurement protocol: no locked clocks (sudo unavailable); adaptive warmup (§9.1 amended).
 """
 
@@ -31,22 +33,23 @@ DATA_RAW  = os.path.join(REPO_ROOT, "data", "raw")
 DATA_PROC = os.path.join(REPO_ROOT, "data", "processed")
 os.makedirs(DATA_PROC, exist_ok=True)
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-PLATFORM = "nvidia_rtx5060"
-
-ALL_ABSTRACTIONS = [
-    "native",
-    "kokkos",
-    "raja",
-    "sycl",
-    "julia",
-    "numba",
-]
+# ── Platform configurations (D8) ──────────────────────────────────────────────
+PLATFORM_CONFIGS = {
+    "nvidia_rtx5060": {
+        "abstractions": ["native", "kokkos", "raja", "sycl", "julia", "numba"],
+        "unsupported":  {"numba"},          # CC 12.0 PTX mismatch
+        "peak_bw_gbs":  270.0,              # GB/s — E1 STREAM measured
+        "peak_fp64_gflops": 261.0,          # GFLOP/s
+    },
+    "amd_mi300x": {
+        "abstractions": ["native", "kokkos", "raja", "sycl", "julia"],
+        "unsupported":  set(),
+        "peak_bw_gbs":  4010.0,             # GB/s — E1 STREAM measured
+        "peak_fp64_gflops": 163400.0,       # GFLOP/s (163.4 TFLOP/s datasheet)
+    },
+}
 
 MATRIX_TYPES = ["laplacian_2d", "random_sparse", "power_law"]
-
-# Abstractions with hard CC 12.0 incompatibility on RTX 5060
-UNSUPPORTED_CC120 = {"numba"}
 
 PROBLEM_SIZES = {
     "small":  1024,
@@ -58,25 +61,31 @@ PROBLEM_SIZES = {
 # ── Load raw CSVs ─────────────────────────────────────────────────────────────
 def load_e4_csvs() -> pd.DataFrame:
     frames = []
-    for abs_name in ALL_ABSTRACTIONS:
-        pattern = os.path.join(DATA_RAW, f"spmv_{abs_name}_{PLATFORM}_*.csv")
-        files = sorted(glob.glob(pattern))
-        if not files:
-            if abs_name in UNSUPPORTED_CC120:
-                print(f"  UNSUPPORTED_CC120: {abs_name} — Numba 0.64.0 does not support"
-                      f" CC 12.0 (Blackwell); PTX 9.2 rejected by driver (max PTX 9.1)."
-                      f" Platform limitation, not a SKIP.",
-                      file=sys.stderr)
-            else:
-                print(f"  WARNING: no CSV for abstraction={abs_name}", file=sys.stderr)
-            continue
-        df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
-        if len(df) == 0 and abs_name in UNSUPPORTED_CC120:
-            print(f"  UNSUPPORTED_CC120: {abs_name} — empty CSV (PTX mismatch)",
-                  file=sys.stderr)
-            continue
-        print(f"  {abs_name:16s}: {len(df):4d} rows from {len(files)} file(s)")
-        frames.append(df)
+    for platform, cfg in PLATFORM_CONFIGS.items():
+        found_any = False
+        for abs_name in cfg["abstractions"]:
+            pattern = os.path.join(DATA_RAW, f"spmv_{abs_name}_{platform}_*.csv")
+            files = sorted(glob.glob(pattern))
+            if not files:
+                if abs_name in cfg["unsupported"]:
+                    print(f"  {platform}/{abs_name}: UNSUPPORTED — skipped",
+                          file=sys.stderr)
+                else:
+                    print(f"  WARNING: no CSV for {platform}/{abs_name}", file=sys.stderr)
+                continue
+            df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+            if len(df) == 0:
+                if abs_name in cfg["unsupported"]:
+                    print(f"  {platform}/{abs_name}: UNSUPPORTED (empty) — skipped",
+                          file=sys.stderr)
+                continue
+            df["platform"] = platform
+            print(f"  {platform}/{abs_name:16s}: {len(df):4d} rows from {len(files)} file(s)")
+            frames.append(df)
+            found_any = True
+        if not found_any:
+            print(f"  WARNING: no CSVs found for platform={platform}", file=sys.stderr)
+
     if not frames:
         raise RuntimeError("No CSV files found — check DATA_RAW path and run run_spmv.sh first")
     return pd.concat(frames, ignore_index=True)
@@ -93,16 +102,19 @@ def filter_clean(df: pd.DataFrame) -> pd.DataFrame:
 # ── Summary statistics ────────────────────────────────────────────────────────
 def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for (abs_name, matrix_type, size_label), grp in df.groupby(
-            ["abstraction", "matrix_type", "problem_size"]):
+    all_abs_global = ["native", "kokkos", "raja", "sycl", "julia", "numba"]
+    plat_order = list(PLATFORM_CONFIGS.keys())
+
+    for (platform, abs_name, matrix_type, size_label), grp in df.groupby(
+            ["platform", "abstraction", "matrix_type", "problem_size"]):
         gflops = grp["throughput_gflops"].dropna().to_numpy(dtype=float)
         if len(gflops) == 0:
             continue
         q1, q3 = np.percentile(gflops, [25, 75])
-        # Use actual n_rows/nnz from data (laplacian_2d grid may differ from target_N)
         n_rows = int(grp["n_rows"].iloc[0]) if "n_rows" in grp.columns else PROBLEM_SIZES.get(size_label, 0)
         nnz    = int(grp["nnz"].iloc[0])    if "nnz"    in grp.columns else 0
         rows.append({
+            "platform":       platform,
             "abstraction":    abs_name,
             "matrix_type":    matrix_type,
             "problem_size":   size_label,
@@ -121,15 +133,17 @@ def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
             "q3_gflops":      float(q3),
         })
 
-    abs_order  = {a: i for i, a in enumerate(ALL_ABSTRACTIONS)}
+    abs_order  = {a: i for i, a in enumerate(all_abs_global)}
     mtyp_order = {m: i for i, m in enumerate(MATRIX_TYPES)}
     size_order = {"small": 0, "medium": 1, "large": 2}
     result = pd.DataFrame(rows)
-    result["_ord_abs"]  = result["abstraction"].map(abs_order)
-    result["_ord_mtyp"] = result["matrix_type"].map(mtyp_order)
-    result["_ord_size"] = result["problem_size"].map(size_order)
-    result = result.sort_values(["_ord_mtyp", "_ord_size", "_ord_abs"]) \
-                   .drop(columns=["_ord_abs", "_ord_mtyp", "_ord_size"]) \
+    result["_ord_plat"] = result["platform"].apply(
+        lambda p: plat_order.index(p) if p in plat_order else 999)
+    result["_ord_abs"]  = result["abstraction"].map(abs_order).fillna(999)
+    result["_ord_mtyp"] = result["matrix_type"].map(mtyp_order).fillna(999)
+    result["_ord_size"] = result["problem_size"].map(size_order).fillna(999)
+    result = result.sort_values(["_ord_plat", "_ord_mtyp", "_ord_size", "_ord_abs"]) \
+                   .drop(columns=["_ord_plat", "_ord_abs", "_ord_mtyp", "_ord_size"]) \
                    .reset_index(drop=True)
     return result
 
@@ -137,9 +151,9 @@ def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
 # ── Efficiency and PPC ────────────────────────────────────────────────────────
 def compute_efficiency(stats: pd.DataFrame) -> pd.DataFrame:
     stats = stats.copy()
-    # Native baseline keyed by (matrix_type, problem_size)
+    # Native baseline keyed by (platform, matrix_type, problem_size)
     native_rows = stats[stats["abstraction"] == "native"].set_index(
-        ["matrix_type", "problem_size"])
+        ["platform", "matrix_type", "problem_size"])
 
     if native_rows.empty:
         print("  WARNING: native baseline not found — efficiency not computed",
@@ -149,15 +163,15 @@ def compute_efficiency(stats: pd.DataFrame) -> pd.DataFrame:
         stats["ppc_tier"] = "unknown"
         return stats
 
-    def native_median(mtype: str, size_label: str) -> float:
-        key = (mtype, size_label)
+    def native_median(platform: str, mtype: str, size_label: str) -> float:
+        key = (platform, mtype, size_label)
         if key in native_rows.index:
             return float(native_rows.loc[key, "median_gflops"])
         return np.nan
 
     efficiencies = []
     for _, row in stats.iterrows():
-        nm = native_median(row["matrix_type"], row["problem_size"])
+        nm = native_median(row["platform"], row["matrix_type"], row["problem_size"])
         if row["abstraction"] == "native" or np.isnan(nm) or nm == 0:
             eff = 1.0 if row["abstraction"] == "native" else np.nan
         else:
@@ -193,28 +207,35 @@ def compute_efficiency(stats: pd.DataFrame) -> pd.DataFrame:
 def print_report(stats: pd.DataFrame):
     print()
     print("E4 SpMV Summary (median GFLOP/s, efficiency vs native):")
-    for matrix_type in MATRIX_TYPES:
-        sub_m = stats[stats["matrix_type"] == matrix_type]
-        if sub_m.empty:
+    for platform in PLATFORM_CONFIGS:
+        sub_plat = stats[stats["platform"] == platform]
+        if sub_plat.empty:
             continue
-        print()
-        print(f"  Matrix type: {matrix_type}")
-        print("-" * 90)
-        for size_label in ["small", "medium", "large"]:
-            sub = sub_m[sub_m["problem_size"] == size_label]
-            if sub.empty:
+        print(f"\n{'='*84}")
+        print(f"  Platform: {platform}")
+        print(f"{'='*84}")
+        for matrix_type in MATRIX_TYPES:
+            sub_m = sub_plat[sub_plat["matrix_type"] == matrix_type]
+            if sub_m.empty:
                 continue
-            n_rows = PROBLEM_SIZES[size_label]
-            print(f"\n  Problem size: {size_label} (N≈{n_rows} rows)")
-            print(f"  {'Abstraction':18s} {'Median GFLOP/s':>15s} {'IQR':>8s} {'Eff':>7s} "
-                  f"{'CV%':>6s} {'Tier':>12s} {'Flag':>5s}")
-            print(f"  {'-'*18} {'-'*15} {'-'*8} {'-'*7} {'-'*6} {'-'*12} {'-'*5}")
-            for _, row in sub.iterrows():
-                flag    = "⚑" if row.get("flag_deep_profiling", False) else ""
-                eff_str = f"{row['efficiency']:.4f}" if not np.isnan(row["efficiency"]) else "  n/a "
-                print(f"  {row['abstraction']:18s} {row['median_gflops']:>15.4f} "
-                      f"{row['iqr_gflops']:>8.4f} {eff_str:>7s} "
-                      f"{row['cv_pct']:>6.2f} {row['ppc_tier']:>12s} {flag}")
+            print()
+            print(f"  Matrix type: {matrix_type}")
+            print("-" * 90)
+            for size_label in ["small", "medium", "large"]:
+                sub = sub_m[sub_m["problem_size"] == size_label]
+                if sub.empty:
+                    continue
+                n_rows = PROBLEM_SIZES[size_label]
+                print(f"\n  Problem size: {size_label} (N≈{n_rows} rows)")
+                print(f"  {'Abstraction':18s} {'Median GFLOP/s':>15s} {'IQR':>8s} {'Eff':>7s} "
+                      f"{'CV%':>6s} {'Tier':>12s} {'Flag':>5s}")
+                print(f"  {'-'*18} {'-'*15} {'-'*8} {'-'*7} {'-'*6} {'-'*12} {'-'*5}")
+                for _, row in sub.iterrows():
+                    flag    = "⚑" if row.get("flag_deep_profiling", False) else ""
+                    eff_str = f"{row['efficiency']:.4f}" if not np.isnan(row["efficiency"]) else "  n/a "
+                    print(f"  {row['abstraction']:18s} {row['median_gflops']:>15.4f} "
+                          f"{row['iqr_gflops']:>8.4f} {eff_str:>7s} "
+                          f"{row['cv_pct']:>6.2f} {row['ppc_tier']:>12s} {flag}")
 
     flagged = stats[stats.get("flag_deep_profiling", pd.Series(dtype=bool)).astype(bool)]
     if not flagged.empty:

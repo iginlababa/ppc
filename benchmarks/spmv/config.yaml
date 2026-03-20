@@ -24,25 +24,36 @@ timing:
   outlier_threshold_sigma: 2.0
 
 abstractions:
-  - native
+  - native          # CUDA on NVIDIA (spmv-cuda); HIP on AMD (spmv-hip)
   - kokkos
   - raja
   - sycl
   - julia
+  # numba: portability failure on RTX 5060 (CC 12.0 / Blackwell — PTX 9.2 mismatch)
+  #        not built on AMD (numba-hip experimental)
 
 platforms:
-  - nvidia_a100
-  - amd_mi250x
-  - intel_pvc
+  - nvidia_rtx5060_laptop:
+      native_binary: spmv-cuda
+      abstractions: [native, kokkos, raja, julia]   # sycl pending, numba failed
+      peak_bw_gbs: 270
+  - amd_mi300x:
+      native_binary: spmv-hip
+      abstractions: [native, kokkos, raja, sycl, julia]
+      peak_bw_gbs: 4010
+  # future:
+  # - intel_pvc
 
 notes:
   - "Workhorse of iterative solvers — SpMV dominates GMRES/CG runtime"
-  - "Tests indirect memory access handling"
-  - "Known RAJA overhead pattern (Pattern 1 in taxonomy — Launch Overhead Dominance)"
+  - "Tests indirect memory access handling (x[col_idx[j]] — non-coalesced)"
+  - "AI ≈ 0.13 FLOP/byte — firmly memory-bound on all platforms"
+  - "power_law matrix tests wavefront-64 load imbalance on AMD"
+  - "native maps to spmv-hip binary on AMD (kernel_spmv_hip.cpp)"
 
 correctness:
-  tolerance: 1.0e-6
+  tolerance: 1.0e-10
   reference: native
 
 deep_profiling_trigger:
-  overhead_threshold: 0.15
+  overhead_threshold: 0.15   # flag if efficiency < 0.85
