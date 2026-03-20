@@ -1,0 +1,5 @@
+kernel,abstraction,problem_size,ppc,n_platforms,platforms,ppc_tier,min_efficiency,max_efficiency
+stream,julia,large,0.966,1,amd_mi300x,excellent,0.966,0.966
+stream,kokkos,large,1.0163,1,amd_mi300x,excellent,1.0163,1.0163
+stream,raja,large,0.9135,1,amd_mi300x,excellent,0.9135,0.9135
+stream,sycl,large,0.9797,1,amd_mi300x,excellent,0.9797,0.9797
