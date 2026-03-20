@@ -4,53 +4,76 @@ project(e2_dgemm LANGUAGES CXX)
 # ── E2 DESIGN DECISIONS ───────────────────────────────────────────────────────
 # [D2] TILE=32 baked into dgemm_common.h; no CMake option needed.
 # [D5] native_cublas: same binary as native (dgemm-cuda) with --mode cublas.
+#      native_rocblas: same binary as native (dgemm-hip) with --mode rocblas.
 # CUDA enabled only when at least one CUDA-backend target is requested.
 # RAJA compiled as CUDA TU when RAJA CUDA backend detected (same logic as stream).
 # SYCL: conditional on -DDGEMM_ENABLE_SYCL=ON and a working SYCL compiler.
+# HIP: conditional on -DDGEMM_ENABLE_HIP=ON; disables CUDA language entirely.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Options ───────────────────────────────────────────────────────────────────
-option(DGEMM_ENABLE_SYCL  "Build SYCL DGEMM target"   OFF)
-option(DGEMM_ENABLE_JULIA "Build Julia DGEMM wrapper"  ON)
-option(DGEMM_ENABLE_NUMBA "Build Numba DGEMM wrapper"  ON)
+option(DGEMM_ENABLE_HIP   "Build HIP DGEMM target (AMD/ROCm)"  OFF)
+option(DGEMM_ENABLE_SYCL  "Build SYCL DGEMM target"            OFF)
+option(DGEMM_ENABLE_JULIA "Build Julia DGEMM wrapper"           ON)
+option(DGEMM_ENABLE_NUMBA "Build Numba DGEMM wrapper"           ON)
 
-# ── CUDA ──────────────────────────────────────────────────────────────────────
-# Always try CUDA — native + cublas targets require it.
-if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
-    find_program(_GXX g++)
-    if(_GXX)
-        set(CMAKE_CUDA_HOST_COMPILER "${_GXX}" CACHE STRING "")
+# ── CUDA (skipped when HIP requested — nvcc not available on AMD machines) ────
+if(NOT DGEMM_ENABLE_HIP)
+    if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
+        find_program(_GXX g++)
+        if(_GXX)
+            set(CMAKE_CUDA_HOST_COMPILER "${_GXX}" CACHE STRING "")
+        endif()
     endif()
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
 endif()
-enable_language(CUDA)
-find_package(CUDAToolkit REQUIRED)
 
 # ── Common include ────────────────────────────────────────────────────────────
 set(DGEMM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 # ── dgemm-cuda (native tiled + --mode cublas ceiling) ────────────────────────
-add_executable(dgemm-cuda kernel_dgemm_cuda.cu)
-target_include_directories(dgemm-cuda PRIVATE ${DGEMM_INCLUDE_DIR})
-target_link_libraries(dgemm-cuda PRIVATE CUDA::cublas CUDA::cudart)
-target_compile_options(dgemm-cuda PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:
-        -O3 --use_fast_math --generate-line-info
-        --expt-extended-lambda --expt-relaxed-constexpr
-        -Xcompiler=-Wall,-Wextra>)
-set_target_properties(dgemm-cuda PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
+if(NOT DGEMM_ENABLE_HIP)
+    add_executable(dgemm-cuda kernel_dgemm_cuda.cu)
+    target_include_directories(dgemm-cuda PRIVATE ${DGEMM_INCLUDE_DIR})
+    target_link_libraries(dgemm-cuda PRIVATE CUDA::cublas CUDA::cudart)
+    target_compile_options(dgemm-cuda PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:
+            -O3 --use_fast_math --generate-line-info
+            --expt-extended-lambda --expt-relaxed-constexpr
+            -Xcompiler=-Wall,-Wextra>)
+    set_target_properties(dgemm-cuda PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
+endif()
+
+# ── dgemm-hip (native tiled + --mode rocblas ceiling) ────────────────────────
+if(DGEMM_ENABLE_HIP)
+    find_package(hip REQUIRED)
+    find_package(rocblas REQUIRED)
+    add_executable(dgemm-hip kernel_dgemm_hip.cpp)
+    target_include_directories(dgemm-hip PRIVATE ${DGEMM_INCLUDE_DIR})
+    target_link_libraries(dgemm-hip PRIVATE hip::device roc::rocblas)
+    target_compile_options(dgemm-hip PRIVATE -O3 -Wall -Wextra)
+endif()
 
 # ── dgemm-kokkos ──────────────────────────────────────────────────────────────
 find_package(Kokkos QUIET)
 if(Kokkos_FOUND)
-    # Detect CUDA backend: Kokkos exports "cuda" in INTERFACE_LINK_LIBRARIES
     get_target_property(_kokkos_iface Kokkos::kokkos INTERFACE_LINK_LIBRARIES)
-    if("cuda" IN_LIST _kokkos_iface OR "CUDA::cudart" IN_LIST _kokkos_iface)
-        set_source_files_properties(kernel_dgemm_kokkos.cpp PROPERTIES LANGUAGE CUDA)
-        message(STATUS "  DGEMM: Kokkos CUDA backend — compiling as CUDA TU")
+    if(NOT DGEMM_ENABLE_HIP)
+        if("cuda" IN_LIST _kokkos_iface OR "CUDA::cudart" IN_LIST _kokkos_iface)
+            set_source_files_properties(kernel_dgemm_kokkos.cpp PROPERTIES LANGUAGE CUDA)
+            message(STATUS "  DGEMM: Kokkos CUDA backend — compiling as CUDA TU")
+        endif()
+    else()
+        message(STATUS "  DGEMM: Kokkos HIP backend — compiling as CXX")
     endif()
     add_executable(dgemm-kokkos kernel_dgemm_kokkos.cpp)
     target_include_directories(dgemm-kokkos PRIVATE ${DGEMM_INCLUDE_DIR})
-    target_link_libraries(dgemm-kokkos PRIVATE Kokkos::kokkos CUDA::cudart)
+    if(NOT DGEMM_ENABLE_HIP)
+        target_link_libraries(dgemm-kokkos PRIVATE Kokkos::kokkos CUDA::cudart)
+    else()
+        target_link_libraries(dgemm-kokkos PRIVATE Kokkos::kokkos)
+    endif()
     target_compile_options(dgemm-kokkos PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-O3 -Wall -Wextra>
         $<$<COMPILE_LANGUAGE:CUDA>:
@@ -67,13 +90,21 @@ endif()
 find_package(RAJA QUIET)
 if(RAJA_FOUND)
     get_target_property(_raja_iface RAJA INTERFACE_LINK_LIBRARIES)
-    if("cuda" IN_LIST _raja_iface OR "CUDA::cudart" IN_LIST _raja_iface)
-        set_source_files_properties(kernel_dgemm_raja.cpp PROPERTIES LANGUAGE CUDA)
-        message(STATUS "  DGEMM: RAJA CUDA backend — compiling as CUDA TU")
+    if(NOT DGEMM_ENABLE_HIP)
+        if("cuda" IN_LIST _raja_iface OR "CUDA::cudart" IN_LIST _raja_iface)
+            set_source_files_properties(kernel_dgemm_raja.cpp PROPERTIES LANGUAGE CUDA)
+            message(STATUS "  DGEMM: RAJA CUDA backend — compiling as CUDA TU")
+        endif()
+    else()
+        message(STATUS "  DGEMM: RAJA HIP backend — compiling as CXX")
     endif()
     add_executable(dgemm-raja kernel_dgemm_raja.cpp)
     target_include_directories(dgemm-raja PRIVATE ${DGEMM_INCLUDE_DIR})
-    target_link_libraries(dgemm-raja PRIVATE RAJA CUDA::cudart)
+    if(NOT DGEMM_ENABLE_HIP)
+        target_link_libraries(dgemm-raja PRIVATE RAJA CUDA::cudart)
+    else()
+        target_link_libraries(dgemm-raja PRIVATE RAJA)
+    endif()
     target_compile_options(dgemm-raja PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-O3 -Wall -Wextra>
         $<$<COMPILE_LANGUAGE:CUDA>:
@@ -82,7 +113,6 @@ if(RAJA_FOUND)
             -Xcompiler=-Wall,-Wextra>)
 else()
     # Fallback: direct path compilation (bypasses broken camp/BLT cmake configs).
-    # Looks for RAJA headers and libRAJA.a/libcamp.a at RAJA_INSTALL_PREFIX.
     if(NOT DEFINED RAJA_INSTALL_PREFIX)
         foreach(_p
                 "/home/obalola/projects/raja/install"
@@ -96,20 +126,29 @@ else()
     endif()
     if(DEFINED RAJA_INSTALL_PREFIX AND EXISTS "${RAJA_INSTALL_PREFIX}/include/RAJA/RAJA.hpp")
         message(STATUS "  DGEMM: RAJA cmake config unavailable — using direct path ${RAJA_INSTALL_PREFIX}")
-        set_source_files_properties(kernel_dgemm_raja.cpp PROPERTIES LANGUAGE CUDA)
+        if(NOT DGEMM_ENABLE_HIP)
+            set_source_files_properties(kernel_dgemm_raja.cpp PROPERTIES LANGUAGE CUDA)
+        endif()
         add_executable(dgemm-raja kernel_dgemm_raja.cpp)
         target_include_directories(dgemm-raja PRIVATE
             ${DGEMM_INCLUDE_DIR}
             ${RAJA_INSTALL_PREFIX}/include)
-        target_link_libraries(dgemm-raja PRIVATE
-            ${RAJA_INSTALL_PREFIX}/lib/libRAJA.a
-            ${RAJA_INSTALL_PREFIX}/lib/libcamp.a
-            CUDA::cudart)
-        target_compile_options(dgemm-raja PRIVATE
-            -O3 --use_fast_math --generate-line-info
-            --expt-extended-lambda --expt-relaxed-constexpr
-            -allow-unsupported-compiler
-            -Xcompiler=-Wall,-Wextra)
+        if(NOT DGEMM_ENABLE_HIP)
+            target_link_libraries(dgemm-raja PRIVATE
+                ${RAJA_INSTALL_PREFIX}/lib/libRAJA.a
+                ${RAJA_INSTALL_PREFIX}/lib/libcamp.a
+                CUDA::cudart)
+            target_compile_options(dgemm-raja PRIVATE
+                -O3 --use_fast_math --generate-line-info
+                --expt-extended-lambda --expt-relaxed-constexpr
+                -allow-unsupported-compiler
+                -Xcompiler=-Wall,-Wextra)
+        else()
+            target_link_libraries(dgemm-raja PRIVATE
+                ${RAJA_INSTALL_PREFIX}/lib/libRAJA.a
+                ${RAJA_INSTALL_PREFIX}/lib/libcamp.a)
+            target_compile_options(dgemm-raja PRIVATE -O3 -Wall -Wextra)
+        endif()
     else()
         message(STATUS "  DGEMM: RAJA not found — skipping dgemm-raja")
     endif()
@@ -117,15 +156,26 @@ endif()
 
 # ── dgemm-sycl ────────────────────────────────────────────────────────────────
 if(DGEMM_ENABLE_SYCL)
-    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|IntelLLVM")
-        message(WARNING "  DGEMM SYCL: CMAKE_CXX_COMPILER may not support -fsycl. "
-                        "Pass -DCMAKE_CXX_COMPILER=icpx or clang++.")
+    # Detect acpp (AdaptiveCpp) — it rejects -fsycl (Intel DPC++ flag)
+    get_filename_component(_sycl_compiler_name "${CMAKE_CXX_COMPILER}" NAME)
+    if(_sycl_compiler_name MATCHES "acpp|syclcc")
+        set(_is_acpp TRUE)
+    else()
+        set(_is_acpp FALSE)
+        if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|IntelLLVM")
+            message(WARNING "  DGEMM SYCL: CMAKE_CXX_COMPILER may not support -fsycl. "
+                            "Pass -DCMAKE_CXX_COMPILER=icpx or clang++.")
+        endif()
     endif()
     add_executable(dgemm-sycl kernel_dgemm_sycl.cpp)
     target_include_directories(dgemm-sycl PRIVATE ${DGEMM_INCLUDE_DIR})
-    target_compile_options(dgemm-sycl PRIVATE -fsycl -O3)
-    target_link_options(dgemm-sycl PRIVATE -fsycl)
-    # SYCL_FLAGS from build script may add -fsycl-targets=... via SYCL_FLAGS var
+    if(NOT _is_acpp)
+        target_compile_options(dgemm-sycl PRIVATE -fsycl -O3)
+        target_link_options(dgemm-sycl PRIVATE -fsycl)
+    else()
+        target_compile_options(dgemm-sycl PRIVATE -O3)
+    endif()
+    # SYCL_FLAGS from build script adds backend-specific flags (e.g. --acpp-targets=...)
     if(DEFINED SYCL_FLAGS)
         separate_arguments(_sycl_flags UNIX_COMMAND "${SYCL_FLAGS}")
         target_compile_options(dgemm-sycl PRIVATE ${_sycl_flags})
@@ -143,7 +193,7 @@ if(DGEMM_ENABLE_JULIA)
 "#!/usr/bin/env bash
 # Auto-generated by CMake — do not edit.
 JULIA_BIN=\"\${JULIA_BIN:-julia}\"
-exec \"\${JULIA_BIN}\" --startup-file=no --project=@. \\
+exec \"\${JULIA_BIN}\" --startup-file=no --project=\"${CMAKE_CURRENT_SOURCE_DIR}\" \\
      \"${_julia_src}\" \"\$@\"
 ")
     file(CHMOD "${_julia_wrapper}" PERMISSIONS
@@ -171,18 +221,22 @@ endif()
 # ── Summary ───────────────────────────────────────────────────────────────────
 message(STATUS "")
 message(STATUS "E2 DGEMM build summary:")
-message(STATUS "  dgemm-cuda    → always (CUDA tiled + --mode cublas ceiling)")
+if(NOT DGEMM_ENABLE_HIP)
+    message(STATUS "  dgemm-cuda    → always (CUDA tiled + --mode cublas ceiling)")
+else()
+    message(STATUS "  dgemm-hip     → always (HIP tiled + --mode rocblas ceiling)")
+endif()
 if(Kokkos_FOUND)
     message(STATUS "  dgemm-kokkos  → Kokkos TeamPolicy tiled")
 endif()
-if(RAJA_FOUND)
+if(RAJA_FOUND OR (DEFINED RAJA_INSTALL_PREFIX AND EXISTS "${RAJA_INSTALL_PREFIX}/include/RAJA/RAJA.hpp"))
     message(STATUS "  dgemm-raja    → RAJA naïve (API Limitation pattern, no shmem)")
 endif()
 if(DGEMM_ENABLE_SYCL)
     message(STATUS "  dgemm-sycl    → SYCL nd_range tiled")
 endif()
 if(DGEMM_ENABLE_JULIA)
-    message(STATUS "  dgemm-julia   → Julia script wrapper (--mode naive|cublas)")
+    message(STATUS "  dgemm-julia   → Julia script wrapper (--mode naive|cublas|rocblas)")
 endif()
 if(DGEMM_ENABLE_NUMBA)
     message(STATUS "  dgemm-numba   → Numba script wrapper (tiled)")

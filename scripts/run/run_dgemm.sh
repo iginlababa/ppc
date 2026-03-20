@@ -62,6 +62,10 @@ BINARY_NAME[native_cublas]="dgemm-cuda"
 BINARY_MODE[native_cublas]="cublas"
 CSV_LABEL[native_cublas]="native_cublas"
 
+BINARY_NAME[native_rocblas]="dgemm-hip"
+BINARY_MODE[native_rocblas]="rocblas"
+CSV_LABEL[native_rocblas]="native_rocblas"
+
 BINARY_NAME[kokkos]="dgemm-kokkos"
 BINARY_MODE[kokkos]=""
 CSV_LABEL[kokkos]="kokkos"
@@ -82,11 +86,27 @@ BINARY_NAME[julia_cublas]="dgemm-julia"
 BINARY_MODE[julia_cublas]="cublas"
 CSV_LABEL[julia_cublas]="julia_cublas"
 
+BINARY_NAME[julia_rocblas]="dgemm-julia"
+BINARY_MODE[julia_rocblas]="rocblas"
+CSV_LABEL[julia_rocblas]="julia_rocblas"
+
 BINARY_NAME[numba]="dgemm-numba"
 BINARY_MODE[numba]=""
 CSV_LABEL[numba]="numba"
 
 ALL_ABSTRACTIONS=(native native_cublas kokkos raja_naive sycl julia_naive julia_cublas numba)
+
+# ── AMD platform overrides ────────────────────────────────────────────────────
+# For AMD platforms, the native binary is dgemm-hip and the library ceiling
+# abstraction is native_rocblas (not native_cublas).
+VENDOR="${PLATFORM%%_*}"
+if [[ "${VENDOR}" == "amd" ]]; then
+    BINARY_NAME[native]="dgemm-hip"
+    BINARY_MODE[native]="native"
+    ALL_ABSTRACTIONS=(native native_rocblas kokkos raja_naive julia_naive julia_rocblas)
+    # Julia must use AMDGPU backend
+    export JULIA_GPU_BACKEND="amd"
+fi
 
 # ── Binary finder ─────────────────────────────────────────────────────────────
 # Strips known run-tags (_locked) from platform when looking up build dirs.
@@ -96,14 +116,19 @@ find_binary() {
     # Determine build directory stem from abstraction
     local dir_stem
     case "${abs}" in
-        native|native_cublas) dir_stem="cuda"      ;;
-        kokkos)               dir_stem="kokkos"    ;;
-        raja_naive)           dir_stem="raja"      ;;
-        sycl)                 dir_stem="sycl"      ;;
-        julia_naive|julia_cublas) dir_stem="julia" ;;
-        numba)                dir_stem="numba"     ;;
-        *) dir_stem="${abs}"                       ;;
+        native|native_cublas)           dir_stem="cuda"   ;;
+        native_rocblas)                 dir_stem="hip"    ;;
+        kokkos)                         dir_stem="kokkos" ;;
+        raja_naive)                     dir_stem="raja"   ;;
+        sycl)                           dir_stem="sycl"   ;;
+        julia_naive|julia_cublas|julia_rocblas) dir_stem="julia" ;;
+        numba)                          dir_stem="numba"  ;;
+        *) dir_stem="${abs}"                              ;;
     esac
+    # AMD: native uses dgemm-hip, found in the hip build dir
+    if [[ "${VENDOR}" == "amd" && "${abs}" == "native" ]]; then
+        dir_stem="hip"
+    fi
 
     local p="${BUILD_BASE}/${dir_stem}_${PLATFORM}/${bin_name}"
     [[ -x "${p}" ]] && { echo "${p}"; return 0; }

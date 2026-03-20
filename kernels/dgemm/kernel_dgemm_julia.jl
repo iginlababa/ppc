@@ -1,35 +1,45 @@
 #!/usr/bin/env julia
-# kernel_dgemm_julia.jl — E2 DGEMM: Julia/CUDA.jl naive + CUBLAS ceiling.
+# kernel_dgemm_julia.jl — E2 DGEMM: Julia GPU-backend-aware naive + library ceiling.
 #
 # E2 DESIGN DECISIONS
-# [D2-Julia] --mode naive: simple @cuda kernel, no shared memory, column-major
-#   CuArrays. Julia's natural layout. Each thread computes one C[row,col] via
-#   O(N) inner loop from global memory. Expected behavior: memory-bandwidth-
-#   limited, similar to raja_naive, exposing the same no-tiling penalty.
-#   (Tiling in Julia with @cuStaticSharedMem is possible but out of scope —
-#   naive is the scientifically interesting comparison here.)
-# [D5-Julia] --mode cublas: CUBLAS.gemm! ceiling reference (julia_cublas).
-#   Uses Julia's column-major CuArrays directly — no transpose tricks needed.
-#   CUBLAS.gemm! dispatches to cuBLAS DGEMM natively.
-# [D3] alpha=1.0, beta=0.0. Julia arrays are 1-indexed, column-major.
-# [D7] experiment_id format: dgemm_julia_{naive|cublas}_{platform}_{size}_n{N}_{run:03d}
+# [D2-Julia] --mode naive: simple GPU kernel, no shared memory, column-major arrays.
+#   Julia's natural layout. Each thread computes one C[row,col] via O(N) inner
+#   loop from global memory. Expected behavior: memory-bandwidth-limited, similar
+#   to raja_naive, exposing the no-tiling penalty.
+# [D5-Julia] --mode cublas / --mode rocblas: library ceiling reference.
+#   Uses Julia's column-major GPU arrays directly — no transpose tricks needed.
+# [D3] alpha=1.0, beta=0.0.
+# [D7] experiment_id: dgemm_julia_{naive|cublas|rocblas}_{platform}_{size}_n{N}_{run:03d}
+#
+# Backend selection: JULIA_GPU_BACKEND env var (default: "cuda")
+#   cuda → CUDA.jl + CUBLAS   (--mode naive|cublas)
+#   amd  → AMDGPU.jl + rocBLAS (--mode naive|rocblas)
 
-using CUDA
-using LinearAlgebra: mul!
+const BACKEND = get(ENV, "JULIA_GPU_BACKEND", "cuda")
+
+if BACKEND == "amd"
+    using AMDGPU
+    import AMDGPU.rocBLAS
+    gpu_rand(T, dims...)   = AMDGPU.rand(T, dims...)
+    gpu_zeros(T, dims...)  = AMDGPU.zeros(T, dims...)
+    gpu_synchronize()      = AMDGPU.synchronize()
+    to_gpu(x)              = ROCArray(x)
+    from_gpu(x)            = Array(x)
+else  # "cuda"
+    using CUDA
+    import CUDA.CUBLAS
+    gpu_rand(T, dims...)   = CUDA.rand(T, dims...)
+    gpu_zeros(T, dims...)  = CUDA.zeros(T, dims...)
+    gpu_synchronize()      = CUDA.synchronize()
+    to_gpu(x)              = CuArray(x)
+    from_gpu(x)            = Array(x)
+end
+
 using Printf: @printf
 using Statistics: median, mean, quantile
 
-# ── Design decisions logged at runtime ───────────────────────────────────────
-const DESIGN_DECISIONS = """
-# E2 DESIGN DECISIONS (Julia)
-# [D2-Julia] naive mode: no shared memory; column-major CuArrays; one thread per element
-# [D5-Julia] cublas mode: CUBLAS.gemm! ceiling reference
-# [D3] alpha=1.0, beta=0.0
-"""
-
 # ── Naive kernel: one thread per output element ───────────────────────────────
 function dgemm_naive_kernel!(C, A, B, alpha::Float64, beta::Float64, N::Int32)
-    # Thread mapping: row varies by threadIdx.x (column-major friendly)
     row = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     col = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
 
@@ -41,6 +51,24 @@ function dgemm_naive_kernel!(C, A, B, alpha::Float64, beta::Float64, N::Int32)
         @inbounds C[row, col] = alpha * acc + beta * C[row, col]
     end
     return nothing
+end
+
+function launch_naive_kernel!(C_d, A_d, B_d, alpha, beta, N32, threads, blocks)
+    if BACKEND == "amd"
+        @roc groupsize=threads gridsize=blocks dgemm_naive_kernel!(
+            C_d, A_d, B_d, alpha, beta, N32)
+    else
+        @cuda threads=threads blocks=blocks dgemm_naive_kernel!(
+            C_d, A_d, B_d, alpha, beta, N32)
+    end
+end
+
+function blas_gemm!(A_d, B_d, C_d, alpha, beta)
+    if BACKEND == "amd"
+        rocBLAS.gemm!('N', 'N', alpha, A_d, B_d, beta, C_d)
+    else
+        CUBLAS.gemm!('N', 'N', alpha, A_d, B_d, beta, C_d)
+    end
 end
 
 # ── GFLOP/s formula ───────────────────────────────────────────────────────────
@@ -57,32 +85,30 @@ end
 
 # ── Run one timed experiment ──────────────────────────────────────────────────
 function run_dgemm(mode::String, N::Int, warmup::Int, reps::Int, platform::String)
-    print(DESIGN_DECISIONS)
-    @printf("# abstraction=julia_%s N=%d warmup=%d reps=%d platform=%s\n",
-            mode, N, warmup, reps, platform)
+    blas_mode = BACKEND == "amd" ? "rocblas" : "cublas"
+    @printf("# abstraction=julia_%s backend=%s N=%d warmup=%d reps=%d platform=%s\n",
+            mode, BACKEND, N, warmup, reps, platform)
 
-    # Allocate column-major CuArrays (Julia default)
-    A_d = CUDA.rand(Float64, N, N)
-    B_d = CUDA.rand(Float64, N, N)
-    C_d = CUDA.zeros(Float64, N, N)
+    A_d = gpu_rand(Float64, N, N)
+    B_d = gpu_rand(Float64, N, N)
+    C_d = gpu_zeros(Float64, N, N)
 
-    tile = 32
+    tile    = 32
     threads = (tile, tile)
     blocks  = (cld(N, tile), cld(N, tile))
     alpha   = 1.0
     beta    = 0.0
     N32     = Int32(N)
 
-    run_once = if mode == "cublas"
+    run_once = if mode == blas_mode
         () -> begin
-            CUBLAS.gemm!('N', 'N', alpha, A_d, B_d, beta, C_d)
-            CUDA.synchronize()
+            blas_gemm!(A_d, B_d, C_d, alpha, beta)
+            gpu_synchronize()
         end
     else  # naive
         () -> begin
-            @cuda threads=threads blocks=blocks dgemm_naive_kernel!(
-                C_d, A_d, B_d, alpha, beta, N32)
-            CUDA.synchronize()
+            launch_naive_kernel!(C_d, A_d, B_d, alpha, beta, N32, threads, blocks)
+            gpu_synchronize()
         end
     end
 
@@ -90,7 +116,7 @@ function run_dgemm(mode::String, N::Int, warmup::Int, reps::Int, platform::Strin
     for _ in 1:warmup
         run_once()
     end
-    CUDA.synchronize()
+    gpu_synchronize()
 
     # Timed runs
     gflops_vec = Float64[]
@@ -130,12 +156,11 @@ end
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 function main()
-    # Defaults matching E2 protocol
     N        = 8192
     warmup   = 50
     reps     = 30
     platform = "unknown"
-    mode     = "naive"   # naive | cublas
+    mode     = "naive"   # naive | cublas | rocblas
     verify   = false
 
     args = ARGS
@@ -153,40 +178,39 @@ function main()
         end
     end
 
-    if mode ∉ ("naive", "cublas")
-        @error "--mode must be naive or cublas"
+    blas_mode = BACKEND == "amd" ? "rocblas" : "cublas"
+    if mode ∉ ("naive", blas_mode)
+        @error "--mode must be naive or $(blas_mode) for BACKEND=$(BACKEND)"
         exit(1)
     end
 
     # ── Correctness check ─────────────────────────────────────────────────────
     if verify
-        Nv    = 128
-        # CPU reference: Julia mul! for column-major (equivalent to A*B)
-        hAv   = [1.0 / Float64(i + j) for i in 1:Nv, j in 1:Nv]
-        hBv   = [1.0 / Float64(i + j) for i in 1:Nv, j in 1:Nv]
-        hRv   = hAv * hBv   # CPU reference (column-major, alpha=1, beta=0)
+        Nv      = 128
+        hAv     = [1.0 / Float64(i + j) for i in 1:Nv, j in 1:Nv]
+        hBv     = [1.0 / Float64(i + j) for i in 1:Nv, j in 1:Nv]
+        hRv     = hAv * hBv   # CPU reference (column-major, alpha=1, beta=0)
 
-        # GPU run at Nv
-        A_d = CuArray(hAv)
-        B_d = CuArray(hBv)
-        C_d = CUDA.zeros(Float64, Nv, Nv)
+        A_d = to_gpu(hAv)
+        B_d = to_gpu(hBv)
+        C_d = gpu_zeros(Float64, Nv, Nv)
         tile = 32
         alpha_v = 1.0; beta_v = 0.0; Nv32 = Int32(Nv)
-        if mode == "cublas"
-            CUBLAS.gemm!('N', 'N', alpha_v, A_d, B_d, beta_v, C_d)
+        if mode == blas_mode
+            blas_gemm!(A_d, B_d, C_d, alpha_v, beta_v)
         else
             vth = (tile, tile)
             vbk = (cld(Nv, tile), cld(Nv, tile))
-            @cuda threads=vth blocks=vbk dgemm_naive_kernel!(C_d, A_d, B_d, alpha_v, beta_v, Nv32)
+            launch_naive_kernel!(C_d, A_d, B_d, alpha_v, beta_v, Nv32, vth, vbk)
         end
-        CUDA.synchronize()
-        hCv = Array(C_d)
+        gpu_synchronize()
+        hCv = from_gpu(C_d)
 
         max_err = maximum(abs.(hCv .- hRv) ./ max.(abs.(hRv), 1e-12))
         ok = max_err < 1e-6
         pass_str = ok ? "PASS" : "FAIL"
-        @printf("VERIFY abstraction=julia_%s N=%d max_rel_err=%.2e %s\n",
-                mode, Nv, max_err, pass_str)
+        @printf("VERIFY abstraction=julia_%s backend=%s N=%d max_rel_err=%.2e %s\n",
+                mode, BACKEND, Nv, max_err, pass_str)
         if !ok
             @error "[E2 verify] julia_$(mode) FAILED — aborting before timing."
             exit(1)
