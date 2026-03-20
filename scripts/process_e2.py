@@ -2,19 +2,31 @@
 """
 E2 DGEMM — data processing pipeline.
 
-Loads raw per-abstraction CSVs, filters clean runs (hw_state_verified=1),
-removes warmup tail (first WARMUP_DROP run_ids), computes per-size statistics
-and efficiency relative to native baseline, flags configurations for deep
-profiling, saves data/processed/e2_dgemm_summary.csv.
+Loads raw per-abstraction CSVs for all configured platforms, filters clean
+runs (hw_state_verified=1), computes per-size statistics and efficiency
+relative to native baseline, flags configurations for deep profiling, and
+saves data/processed/e2_dgemm_summary.csv.
 
 E2 DESIGN DECISIONS
 [D1] Large size: N=8192 (not 16384 from original spec — VRAM headroom on RTX 5060).
-[D5] Ceiling references (native_cublas, julia_cublas) are excluded from PPC
-     computation but included in summary CSV with is_ceiling_ref=True.
+[D5] Ceiling references (native_cublas, native_rocblas, julia_cublas,
+     julia_rocblas) are excluded from PPC computation but included in summary
+     CSV with is_ceiling_ref=True.
 [D6] raja_naive is a PPC abstraction (not a ceiling); its expected low
      efficiency vs native is the API Limitation finding.
 [D7] experiment_id: dgemm_{abstraction}_{platform}_{size_label}_n{N}_{run_id:03d}
-Measurement protocol: locked-clock session, warmup-50 (§9.1), §5.5 RTX 5060.
+
+Measurement protocols
+─────────────────────
+NVIDIA RTX 5060 Laptop (2026-03-14)
+  - warmup=50; hw_state_verified is the sole clean-run gate.
+  - Abstractions: native, native_cublas, raja_naive, julia_naive, julia_cublas, numba
+  - numba: UNSUPPORTED_CC120 — no clean rows (PTX 9.2 rejected by driver)
+
+AMD MI300X (2026-03-20)
+  - warmup=50; hw_state_verified gate only (no clock-boost artifact).
+  - Abstractions: native, native_rocblas, kokkos, raja_naive, sycl,
+                  julia_naive, julia_rocblas
 """
 
 import glob
@@ -30,254 +42,218 @@ DATA_RAW  = os.path.join(REPO_ROOT, "data", "raw")
 DATA_PROC = os.path.join(REPO_ROOT, "data", "processed")
 os.makedirs(DATA_PROC, exist_ok=True)
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-PLATFORM    = "nvidia_rtx5060_laptop"
-WARMUP_DROP = 5      # discard first N run_ids per (abstraction, size, batch)
+# ── Ceiling-reference abstractions ────────────────────────────────────────────
+ALL_CEILING_REFS = {"native_cublas", "native_rocblas", "julia_cublas", "julia_rocblas"}
 
-# All abstractions in display order
-ALL_ABSTRACTIONS = [
-    "native",
-    "native_cublas",   # ceiling reference
-    "kokkos",
-    "raja_naive",
-    "sycl",
-    "julia_naive",
-    "julia_cublas",    # ceiling reference
-    "numba",
-]
+PROBLEM_SIZES = {"small": 1024, "medium": 4096, "large": 8192}
 
-# Ceiling references — excluded from PPC, shown separately in figures
-CEILING_REFS = {"native_cublas", "julia_cublas"}
-
-# Abstractions that participate in PPC computation (non-ceiling, non-native)
-PPC_ABSTRACTIONS = [a for a in ALL_ABSTRACTIONS
-                    if a != "native" and a not in CEILING_REFS]
-
-# SKIP              = missing environment dependency (binary not built, missing
-#                     package, etc.) — fixable by rebuilding or installing.
-# UNSUPPORTED_CC120 = hard platform incompatibility — not fixable with current
-#                     tooling. Specifically: Numba 0.64.0 predates Blackwell
-#                     CC 12.0; libnvvm generates PTX 9.2 which driver 590.48.01
-#                     rejects (max PTX 9.1). No pip-installable fix exists.
-UNSUPPORTED_CC120 = {"numba"}   # abstractions with hard CC 12.0 incompatibility
-
-PROBLEM_SIZES = {
-    "small":  1024,
-    "medium": 4096,
-    "large":  8192,
+# ── Per-platform configuration ────────────────────────────────────────────────
+PLATFORM_CONFIGS = {
+    "nvidia_rtx5060_laptop": {
+        "abstractions": [
+            "native", "native_cublas",
+            "kokkos", "raja_naive", "sycl",
+            "julia_naive", "julia_cublas", "numba",
+        ],
+        "unsupported": {"numba"},   # UNSUPPORTED_CC120: Blackwell CC 12.0
+        "warmup_drop": 5,
+    },
+    "amd_mi300x": {
+        "abstractions": [
+            "native", "native_rocblas",
+            "kokkos", "raja_naive", "sycl",
+            "julia_naive", "julia_rocblas",
+        ],
+        "unsupported": set(),
+        "warmup_drop": 0,
+    },
 }
 
-# ── Load raw CSVs ─────────────────────────────────────────────────────────────
-def load_e2_csvs() -> pd.DataFrame:
+
+# ── Load raw CSVs for one platform ────────────────────────────────────────────
+def load_platform_csvs(platform: str, cfg: dict) -> pd.DataFrame:
     frames = []
-    for abs_name in ALL_ABSTRACTIONS:
-        pattern = os.path.join(DATA_RAW, f"dgemm_{abs_name}_{PLATFORM}_*.csv")
+    for abs_name in cfg["abstractions"]:
+        pattern = os.path.join(DATA_RAW, f"dgemm_{abs_name}_{platform}_*.csv")
         files = sorted(glob.glob(pattern))
         if not files:
-            print(f"  WARNING: no CSV for abstraction={abs_name}", file=sys.stderr)
+            if abs_name not in cfg["unsupported"]:
+                print(f"  WARNING [{platform}]: no CSV for {abs_name}",
+                      file=sys.stderr)
+            else:
+                print(f"  UNSUPPORTED [{platform}]: {abs_name} — skipped",
+                      file=sys.stderr)
             continue
         df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
-        if len(df) == 0 and abs_name in UNSUPPORTED_CC120:
-            print(f"  UNSUPPORTED_CC120: {abs_name} — Numba 0.64.0 does not support"
-                  f" CC 12.0 (Blackwell); PTX 9.2 rejected by driver (max PTX 9.1)."
-                  f" No pip-installable fix. Platform limitation, not a SKIP.",
+        if len(df) == 0 and abs_name in cfg["unsupported"]:
+            print(f"  UNSUPPORTED_CC120 [{platform}]: {abs_name} — 0 rows",
                   file=sys.stderr)
-            continue   # no data rows — do not append empty frame
-        print(f"  {abs_name:16s}: {len(df):4d} rows from {len(files)} file(s)")
+            continue
+        print(f"  {abs_name:20s}: {len(df):4d} rows from {len(files)} file(s)")
         frames.append(df)
     if not frames:
-        raise RuntimeError("No CSV files found — check DATA_RAW path and run run_dgemm.sh first")
-    return pd.concat(frames, ignore_index=True)
-
-
-# ── Batch detection ───────────────────────────────────────────────────────────
-def assign_batch_ids(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.sort_values(["abstraction", "problem_size", "timestamp", "run_id"]) \
-           .reset_index(drop=True)
-    batch_col = []
-    for _, grp in df.groupby(["abstraction", "problem_size"], sort=False):
-        bid = 0
-        prev_rid = None
-        for rid in grp["run_id"]:
-            if prev_rid is not None and rid <= prev_rid:
-                bid += 1
-            batch_col.append(bid)
-            prev_rid = rid
-    df["batch_id"] = batch_col
-    return df
+        raise RuntimeError(f"No CSV files for platform={platform}")
+    combined = pd.concat(frames, ignore_index=True)
+    combined["platform"] = platform
+    return combined
 
 
 # ── Filter ────────────────────────────────────────────────────────────────────
-def filter_and_clean(df: pd.DataFrame) -> pd.DataFrame:
+def filter_and_clean(df: pd.DataFrame, warmup_drop: int) -> pd.DataFrame:
     n_total = len(df)
-
-    # 1. hw_state_verified == 1 only
     df = df[df["hw_state_verified"] == 1].copy()
-    print(f"  hw_state=1 filter:   {len(df):4d}/{n_total} rows kept")
-
-    # 2. Drop first WARMUP_DROP run_ids per (abstraction, problem_size, batch)
-    df = df[df["run_id"] > WARMUP_DROP].copy()
-    print(f"  Drop run_id ≤ {WARMUP_DROP}:     {len(df):4d} rows remain")
-
+    print(f"  hw_state=1 filter: {len(df):4d}/{n_total} rows kept")
+    if warmup_drop > 0:
+        df = df[df["run_id"] > warmup_drop].copy()
+        print(f"  Drop run_id ≤ {warmup_drop}:  {len(df):4d} rows remain")
     return df
 
 
 # ── Summary statistics ────────────────────────────────────────────────────────
-def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
+def compute_stats(df: pd.DataFrame, platform: str, cfg: dict) -> pd.DataFrame:
+    ceiling_refs = ALL_CEILING_REFS
     rows = []
-    for (abs_name, size_label), grp in df.groupby(["abstraction", "problem_size"]):
+    for (abs_name, size_label), grp in df.groupby(["abstraction", "problem_size"],
+                                                   sort=False):
         gf = grp["throughput_gflops"].dropna().to_numpy(dtype=float)
         if len(gf) == 0:
             continue
         q1, q3 = np.percentile(gf, [25, 75])
         n_val = PROBLEM_SIZES.get(size_label, 0)
         rows.append({
-            "abstraction":      abs_name,
-            "problem_size":     size_label,
-            "n_matrix":         n_val,
-            "n_runs":           len(gf),
-            "median_gflops":    float(np.median(gf)),
-            "mean_gflops":      float(np.mean(gf)),
-            "std_gflops":       float(np.std(gf, ddof=1)),
-            "iqr_gflops":       float(q3 - q1),
-            "cv_pct":           float(100.0 * np.std(gf, ddof=1) / np.mean(gf)),
-            "min_gflops":       float(np.min(gf)),
-            "max_gflops":       float(np.max(gf)),
-            "q1_gflops":        float(q1),
-            "q3_gflops":        float(q3),
-            "is_ceiling_ref":   abs_name in CEILING_REFS,
+            "platform":       platform,
+            "abstraction":    abs_name,
+            "problem_size":   size_label,
+            "n_matrix":       n_val,
+            "n_runs":         len(gf),
+            "median_gflops":  float(np.median(gf)),
+            "mean_gflops":    float(np.mean(gf)),
+            "std_gflops":     float(np.std(gf, ddof=1)) if len(gf) > 1 else 0.0,
+            "iqr_gflops":     float(q3 - q1),
+            "cv_pct":         float(100.0 * np.std(gf, ddof=1) / np.mean(gf))
+                              if len(gf) > 1 else 0.0,
+            "min_gflops":     float(np.min(gf)),
+            "max_gflops":     float(np.max(gf)),
+            "q1_gflops":      float(q1),
+            "q3_gflops":      float(q3),
+            "is_ceiling_ref": abs_name in ceiling_refs,
         })
 
-    # Enforce display order
-    order = {a: i for i, a in enumerate(ALL_ABSTRACTIONS)}
+    abs_order  = {a: i for i, a in enumerate(cfg["abstractions"])}
     size_order = {"small": 0, "medium": 1, "large": 2}
     result = pd.DataFrame(rows)
-    result["_ord_abs"]  = result["abstraction"].map(order)
-    result["_ord_size"] = result["problem_size"].map(size_order)
-    result = result.sort_values(["_ord_size", "_ord_abs"]) \
-                   .drop(columns=["_ord_abs", "_ord_size"]) \
-                   .reset_index(drop=True)
+    result["_oa"] = result["abstraction"].map(abs_order).fillna(99)
+    result["_os"] = result["problem_size"].map(size_order)
+    result = (result.sort_values(["_os", "_oa"])
+                    .drop(columns=["_oa", "_os"])
+                    .reset_index(drop=True))
     return result
 
 
-# ── Efficiency and PPC ────────────────────────────────────────────────────────
+# ── Efficiency and flags ───────────────────────────────────────────────────────
 def compute_efficiency(stats: pd.DataFrame) -> pd.DataFrame:
     stats = stats.copy()
+    efficiencies, deep_flags, tiers = [], [], []
 
-    # Native baseline median per size
-    native_rows = stats[stats["abstraction"] == "native"].set_index("problem_size")
-    if native_rows.empty:
-        print("  WARNING: native baseline not found — efficiency not computed",
-              file=sys.stderr)
-        stats["efficiency"] = np.nan
-        stats["flag_deep_profiling"] = False
-        stats["ppc_tier"] = "unknown"
-        return stats
-
-    def native_median(size_label: str) -> float:
-        if size_label in native_rows.index:
-            return float(native_rows.loc[size_label, "median_gflops"])
-        return np.nan
-
-    efficiencies = []
-    for _, row in stats.iterrows():
-        nm = native_median(row["problem_size"])
-        if row["abstraction"] == "native" or np.isnan(nm) or nm == 0:
-            eff = 1.0 if row["abstraction"] == "native" else np.nan
-        else:
-            eff = row["median_gflops"] / nm
-        efficiencies.append(eff)
-
-    stats["efficiency"] = efficiencies
-
-    # Deep profiling flag: any non-ceiling abstraction with efficiency < 0.85
-    stats["flag_deep_profiling"] = (
-        (~stats["is_ceiling_ref"]) &
-        (stats["efficiency"] < 0.85)
-    )
-
-    # PPC tier (project_spec §9.4)
-    def tier(eff, is_ceiling):
-        if is_ceiling:
-            return "ceiling_ref"
-        if np.isnan(eff):
-            return "unknown"
-        if eff >= 0.80:
-            return "excellent"
-        if eff >= 0.60:
-            return "acceptable"
+    def _tier(eff, is_ceiling):
+        if is_ceiling:        return "ceiling_ref"
+        if np.isnan(eff):     return "unknown"
+        if eff >= 0.80:       return "excellent"
+        if eff >= 0.60:       return "acceptable"
         return "poor"
 
-    stats["ppc_tier"] = [
-        tier(row["efficiency"], row["is_ceiling_ref"])
-        for _, row in stats.iterrows()
-    ]
+    for (plat, size), grp in stats.groupby(["platform", "problem_size"]):
+        native_row = grp[grp["abstraction"] == "native"]
+        native_med = float(native_row["median_gflops"].iloc[0]) \
+                     if not native_row.empty else np.nan
+        if not native_row.empty:
+            print(f"    [{plat}/{size}] native: {native_med:.1f} GFLOP/s")
+        else:
+            print(f"    [{plat}/{size}] WARNING: no native baseline",
+                  file=sys.stderr)
 
+        for idx in grp.index:
+            row = stats.loc[idx]
+            if row["abstraction"] == "native":
+                eff = 1.0
+            elif np.isnan(native_med) or native_med == 0:
+                eff = np.nan
+            else:
+                eff = row["median_gflops"] / native_med
+            is_ceil  = bool(row["is_ceiling_ref"])
+            deep     = (not is_ceil) and (not np.isnan(eff)) and (eff < 0.85)
+            efficiencies.append((idx, eff))
+            deep_flags.append((idx, deep))
+            tiers.append((idx, _tier(eff, is_ceil)))
+
+    for idx, v in efficiencies:  stats.at[idx, "efficiency"]          = v
+    for idx, v in deep_flags:    stats.at[idx, "flag_deep_profiling"] = v
+    for idx, v in tiers:         stats.at[idx, "ppc_tier"]            = v
     return stats
 
 
-# ── Report ────────────────────────────────────────────────────────────────────
+# ── Print report ──────────────────────────────────────────────────────────────
 def print_report(stats: pd.DataFrame):
     print()
     print("E2 DGEMM Summary (median GFLOP/s, efficiency vs native):")
-    print("-" * 80)
-    for size_label in ["small", "medium", "large"]:
-        sub = stats[stats["problem_size"] == size_label]
-        if sub.empty:
-            continue
-        N = PROBLEM_SIZES[size_label]
-        print(f"\n  Problem size: {size_label} (N={N})")
-        print(f"  {'Abstraction':18s} {'Median':>10s} {'IQR':>8s} {'Eff':>7s} {'CV%':>6s} {'Tier':>12s} {'Flag':>5s}")
-        print(f"  {'-'*18} {'-'*10} {'-'*8} {'-'*7} {'-'*6} {'-'*12} {'-'*5}")
-        for _, row in sub.iterrows():
-            flag = "⚑" if row["flag_deep_profiling"] else ""
-            ceil = " [ceil]" if row["is_ceiling_ref"] else ""
-            eff_str = f"{row['efficiency']:.4f}" if not np.isnan(row["efficiency"]) else "  n/a "
-            print(f"  {row['abstraction']:18s} {row['median_gflops']:>10.2f} "
-                  f"{row['iqr_gflops']:>8.3f} {eff_str:>7s} "
-                  f"{row['cv_pct']:>6.2f} {row['ppc_tier']:>12s}{ceil} {flag}")
+    for plat in stats["platform"].unique():
+        print(f"\n  Platform: {plat}")
+        print("-" * 90)
+        psub = stats[stats["platform"] == plat]
+        for size_label in ["small", "medium", "large"]:
+            sub = psub[psub["problem_size"] == size_label]
+            if sub.empty:
+                continue
+            N = PROBLEM_SIZES.get(size_label, 0)
+            print(f"\n    [{size_label}] N={N}")
+            hdr = f"    {'Abstraction':20s} {'Median':>10s} {'IQR':>8s} " \
+                  f"{'Eff':>7s} {'CV%':>6s} {'Tier':>12s}"
+            print(hdr)
+            print(f"    {'-'*20} {'-'*10} {'-'*8} {'-'*7} {'-'*6} {'-'*12}")
+            for _, row in sub.iterrows():
+                ceil_tag = " [ceil]" if row["is_ceiling_ref"] else ""
+                flag_tag = " ⚑"     if row["flag_deep_profiling"] else ""
+                eff_str  = f"{row['efficiency']:.4f}" \
+                           if not np.isnan(row["efficiency"]) else "  n/a "
+                print(f"    {row['abstraction']:20s} {row['median_gflops']:>10.2f} "
+                      f"{row['iqr_gflops']:>8.3f} {eff_str:>7s} "
+                      f"{row['cv_pct']:>6.2f} {row['ppc_tier']:>12s}"
+                      f"{ceil_tag}{flag_tag}")
 
-    flagged = stats[stats["flag_deep_profiling"]]
-    if not flagged.empty:
-        print()
-        print("  ⚑ Configurations flagged for deep profiling (efficiency < 0.85):")
-        for _, row in flagged.iterrows():
-            print(f"    {row['abstraction']:18s} {row['problem_size']:8s} "
-                  f"eff={row['efficiency']:.4f} — root cause: API Limitation (expected for raja_naive)")
+
+# ── Process one platform ───────────────────────────────────────────────────────
+def process_platform(platform: str, cfg: dict) -> pd.DataFrame:
+    print(f"\n[process_e2] ── {platform} ──")
+    raw   = load_platform_csvs(platform, cfg)
+    clean = filter_and_clean(raw, cfg["warmup_drop"])
+    stats = compute_stats(clean, platform, cfg)
+    return stats
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    print("[process_e2] Loading raw CSVs ...")
-    raw = load_e2_csvs()
+    all_frames = []
+    for platform, cfg in PLATFORM_CONFIGS.items():
+        df = process_platform(platform, cfg)
+        all_frames.append(df)
 
-    print("[process_e2] Assigning batch IDs ...")
-    raw = assign_batch_ids(raw)
+    combined = pd.concat(all_frames, ignore_index=True)
 
-    print("[process_e2] Filtering ...")
-    clean = filter_and_clean(raw)
+    print("\n[process_e2] Computing efficiency ...")
+    combined = compute_efficiency(combined)
 
-    print("[process_e2] Computing statistics ...")
-    stats = compute_stats(clean)
-
-    print("[process_e2] Computing efficiency vs native baseline ...")
-    stats = compute_efficiency(stats)
-
-    # Round floats for readability
-    float_cols = stats.select_dtypes(include="float").columns
-    stats[float_cols] = stats[float_cols].round(4)
+    float_cols = combined.select_dtypes(include="float").columns
+    combined[float_cols] = combined[float_cols].round(4)
 
     out_path = os.path.join(DATA_PROC, "e2_dgemm_summary.csv")
-    stats.to_csv(out_path, index=False)
-    print(f"[process_e2] Saved → {out_path}")
+    combined.to_csv(out_path, index=False)
+    print(f"\n[process_e2] Saved → {out_path}  ({len(combined)} rows)")
 
-    print_report(stats)
+    print_report(combined)
 
-    # Flag summary
-    n_flagged = int(stats["flag_deep_profiling"].sum())
+    n_flagged = int(combined["flag_deep_profiling"].sum())
     if n_flagged > 0:
-        print(f"\n[process_e2] {n_flagged} configuration(s) flagged for deep profiling.")
-        print("[process_e2] Run nsys/ncu on flagged configs per §9.5 protocol.")
+        print(f"\n[process_e2] {n_flagged} config(s) flagged for deep profiling.")
 
 
 if __name__ == "__main__":

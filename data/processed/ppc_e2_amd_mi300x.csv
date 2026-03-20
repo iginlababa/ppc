@@ -1,0 +1,7 @@
+kernel,abstraction,problem_size,ppc,n_platforms,platforms,ppc_tier,min_efficiency,max_efficiency
+dgemm,julia_naive,large,0.3064,1,amd_mi300x,poor,0.3064,0.3064
+dgemm,julia_rocblas,large,3.7997,1,amd_mi300x,excellent,3.7997,3.7997
+dgemm,kokkos,large,0.9627,1,amd_mi300x,excellent,0.9627,0.9627
+dgemm,native_rocblas,large,10.1086,1,amd_mi300x,excellent,10.1086,10.1086
+dgemm,raja_naive,large,0.189,1,amd_mi300x,poor,0.189,0.189
+dgemm,sycl,large,0.9721,1,amd_mi300x,excellent,0.9721,0.9721
