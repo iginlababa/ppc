@@ -41,10 +41,19 @@ DATA_PROC = os.path.join(REPO_ROOT, "data", "processed")
 os.makedirs(DATA_PROC, exist_ok=True)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-PLATFORM = "nvidia_rtx5060"
+PLATFORM_CONFIGS = {
+    "nvidia_rtx5060": {
+        "abstractions": ["native", "kokkos", "raja", "julia"],
+        # numba: UNSUPPORTED_CC120; sycl: NO_COMPILER on RTX 5060
+    },
+    "amd_mi300x": {
+        "abstractions": ["native", "kokkos", "raja", "sycl", "julia"],
+        # no numba (numba-hip experimental)
+    },
+}
 
-ALL_ABSTRACTIONS = ["native", "kokkos", "raja", "julia"]
-# numba: UNSUPPORTED_CC120; sycl: NO_COMPILER
+# For backward-compat: derive a flat list used in ordering
+ALL_ABSTRACTIONS = ["native", "kokkos", "raja", "sycl", "julia"]
 
 MATRIX_TYPES = ["lower_triangular_laplacian", "lower_triangular_random"]
 
@@ -58,18 +67,19 @@ PROBLEM_SIZES = {
 # ── Load raw CSVs ─────────────────────────────────────────────────────────────
 def load_e5_csvs() -> pd.DataFrame:
     frames = []
-    for abs_name in ALL_ABSTRACTIONS:
-        pattern = os.path.join(DATA_RAW, f"sptrsv_{abs_name}_{PLATFORM}_*.csv")
-        files = sorted(glob.glob(pattern))
-        if not files:
-            print(f"  WARNING: no CSV for abstraction={abs_name}", file=sys.stderr)
-            continue
-        df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
-        if len(df) == 0:
-            print(f"  WARNING: empty CSV for abstraction={abs_name}", file=sys.stderr)
-            continue
-        print(f"  {abs_name:16s}: {len(df):4d} rows from {len(files)} file(s)")
-        frames.append(df)
+    for platform, cfg in PLATFORM_CONFIGS.items():
+        for abs_name in cfg["abstractions"]:
+            pattern = os.path.join(DATA_RAW, f"sptrsv_{abs_name}_{platform}_*.csv")
+            files = sorted(glob.glob(pattern))
+            if not files:
+                print(f"  WARNING: no CSV for {platform}/{abs_name}", file=sys.stderr)
+                continue
+            df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+            if len(df) == 0:
+                print(f"  WARNING: empty CSV for {platform}/{abs_name}", file=sys.stderr)
+                continue
+            print(f"  {platform}/{abs_name:16s}: {len(df):4d} rows from {len(files)} file(s)")
+            frames.append(df)
     if not frames:
         raise RuntimeError("No CSV files found — check DATA_RAW path and run run_sptrsv.sh first")
     return pd.concat(frames, ignore_index=True)
@@ -86,8 +96,14 @@ def filter_clean(df: pd.DataFrame) -> pd.DataFrame:
 # ── Summary statistics ────────────────────────────────────────────────────────
 def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for (abs_name, matrix_type, size_label), grp in df.groupby(
-            ["abstraction", "matrix_type", "problem_size"]):
+    group_cols = ["platform", "abstraction", "matrix_type", "problem_size"] \
+        if "platform" in df.columns else ["abstraction", "matrix_type", "problem_size"]
+    for key, grp in df.groupby(group_cols):
+        if len(group_cols) == 4:
+            platform_name, abs_name, matrix_type, size_label = key
+        else:
+            platform_name = "nvidia_rtx5060"
+            abs_name, matrix_type, size_label = key
         gflops = grp["throughput_gflops"].dropna().to_numpy(dtype=float)
         if len(gflops) == 0:
             continue
@@ -101,6 +117,7 @@ def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
         min_lw    = int(grp["min_level_width"].iloc[0]) if "min_level_width" in grp.columns else 0
 
         rows.append({
+            "platform":         platform_name,
             "abstraction":      abs_name,
             "matrix_type":      matrix_type,
             "problem_size":     size_label,
@@ -122,15 +139,17 @@ def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
             "q3_gflops":        float(q3),
         })
 
+    plat_order = {p: i for i, p in enumerate(PLATFORM_CONFIGS.keys())}
     abs_order  = {a: i for i, a in enumerate(ALL_ABSTRACTIONS)}
     mtyp_order = {m: i for i, m in enumerate(MATRIX_TYPES)}
     size_order = {"small": 0, "medium": 1, "large": 2}
     result = pd.DataFrame(rows)
+    result["_ord_plat"] = result["platform"].map(plat_order).fillna(99)
     result["_ord_abs"]  = result["abstraction"].map(abs_order)
     result["_ord_mtyp"] = result["matrix_type"].map(mtyp_order)
     result["_ord_size"] = result["problem_size"].map(size_order)
-    result = result.sort_values(["_ord_mtyp", "_ord_size", "_ord_abs"]) \
-                   .drop(columns=["_ord_abs", "_ord_mtyp", "_ord_size"]) \
+    result = result.sort_values(["_ord_plat", "_ord_mtyp", "_ord_size", "_ord_abs"]) \
+                   .drop(columns=["_ord_plat", "_ord_abs", "_ord_mtyp", "_ord_size"]) \
                    .reset_index(drop=True)
     return result
 
@@ -138,28 +157,30 @@ def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
 # ── Efficiency, parallelism_ratio, flags ──────────────────────────────────────
 def compute_efficiency(stats: pd.DataFrame) -> pd.DataFrame:
     stats = stats.copy()
+
+    # Build per-platform native baseline index
     native_rows = stats[stats["abstraction"] == "native"].set_index(
-        ["matrix_type", "problem_size"])
+        ["platform", "matrix_type", "problem_size"])
 
     if native_rows.empty:
         print("  WARNING: native baseline not found — efficiency not computed",
               file=sys.stderr)
-        stats["efficiency"]         = np.nan
-        stats["eff_gt1_flag"]       = False
+        stats["efficiency"]          = np.nan
+        stats["eff_gt1_flag"]        = False
         stats["flag_deep_profiling"] = False
-        stats["ppc_tier"]           = "unknown"
-        stats["parallelism_ratio"]  = np.nan
+        stats["ppc_tier"]            = "unknown"
+        stats["parallelism_ratio"]   = np.nan
         return stats
 
-    def native_median(mtype: str, size_label: str) -> float:
-        key = (mtype, size_label)
+    def native_median(platform: str, mtype: str, size_label: str) -> float:
+        key = (platform, mtype, size_label)
         if key in native_rows.index:
             return float(native_rows.loc[key, "median_gflops"])
         return np.nan
 
     efficiencies = []
     for _, row in stats.iterrows():
-        nm = native_median(row["matrix_type"], row["problem_size"])
+        nm = native_median(row["platform"], row["matrix_type"], row["problem_size"])
         if row["abstraction"] == "native" or np.isnan(nm) or nm == 0:
             eff = 1.0 if row["abstraction"] == "native" else np.nan
         else:
@@ -212,34 +233,39 @@ def print_report(stats: pd.DataFrame):
     print("E5 SpTRSV Summary (median GFLOP/s, efficiency vs native):")
     print("Note: SpTRSV is latency-bound — binding constraint is n_levels (serial depth),")
     print("      not bandwidth. GFLOP/s will be << bandwidth-limited peak.")
-    for matrix_type in MATRIX_TYPES:
-        sub_m = stats[stats["matrix_type"] == matrix_type]
-        if sub_m.empty:
-            continue
+    for platform in stats["platform"].unique():
+        sub_p = stats[stats["platform"] == platform]
         print()
-        print(f"  Matrix type: {matrix_type}")
-        print("-" * 110)
-        for size_label in ["small", "medium", "large"]:
-            sub = sub_m[sub_m["problem_size"] == size_label]
-            if sub.empty:
+        print("=" * 90)
+        print(f"  Platform: {platform}")
+        print("=" * 90)
+        for matrix_type in MATRIX_TYPES:
+            sub_m = sub_p[sub_p["matrix_type"] == matrix_type]
+            if sub_m.empty:
                 continue
-            # Print level-set metadata (same for all abstractions at this size)
-            nl_row = sub.iloc[0]
-            print(f"\n  Problem size: {size_label} (N={nl_row['n_rows']} rows, "
-                  f"n_levels={nl_row['n_levels']}, "
-                  f"max_lw={nl_row['max_level_width']}, "
-                  f"par_ratio={nl_row['parallelism_ratio']:.3f})")
-            print(f"  {'Abstraction':18s} {'Median GFLOP/s':>15s} {'IQR':>8s} {'Eff':>7s} "
-                  f"{'CV%':>6s} {'Tier':>12s} {'Flags':>8s}")
-            print(f"  {'-'*18} {'-'*15} {'-'*8} {'-'*7} {'-'*6} {'-'*12} {'-'*8}")
-            for _, row in sub.iterrows():
-                flags = ""
-                if row.get("flag_deep_profiling", False): flags += "⚑"
-                if row.get("eff_gt1_flag", False):        flags += ">1"
-                eff_str = f"{row['efficiency']:.4f}" if not np.isnan(row["efficiency"]) else "  n/a "
-                print(f"  {row['abstraction']:18s} {row['median_gflops']:>15.4f} "
-                      f"{row['iqr_gflops']:>8.4f} {eff_str:>7s} "
-                      f"{row['cv_pct']:>6.2f} {row['ppc_tier']:>12s} {flags:>8s}")
+            print()
+            print(f"  Matrix type: {matrix_type}")
+            print("-" * 110)
+            for size_label in ["small", "medium", "large"]:
+                sub = sub_m[sub_m["problem_size"] == size_label]
+                if sub.empty:
+                    continue
+                nl_row = sub.iloc[0]
+                print(f"\n  Problem size: {size_label} (N={nl_row['n_rows']} rows, "
+                      f"n_levels={nl_row['n_levels']}, "
+                      f"max_lw={nl_row['max_level_width']}, "
+                      f"par_ratio={nl_row['parallelism_ratio']:.3f})")
+                print(f"  {'Abstraction':18s} {'Median GFLOP/s':>15s} {'IQR':>8s} {'Eff':>7s} "
+                      f"{'CV%':>6s} {'Tier':>12s} {'Flags':>8s}")
+                print(f"  {'-'*18} {'-'*15} {'-'*8} {'-'*7} {'-'*6} {'-'*12} {'-'*8}")
+                for _, row in sub.iterrows():
+                    flags = ""
+                    if row.get("flag_deep_profiling", False): flags += "⚑"
+                    if row.get("eff_gt1_flag", False):        flags += ">1"
+                    eff_str = f"{row['efficiency']:.4f}" if not np.isnan(row["efficiency"]) else "  n/a "
+                    print(f"  {row['abstraction']:18s} {row['median_gflops']:>15.4f} "
+                          f"{row['iqr_gflops']:>8.4f} {eff_str:>7s} "
+                          f"{row['cv_pct']:>6.2f} {row['ppc_tier']:>12s} {flags:>8s}")
 
     flagged = stats[stats.get("flag_deep_profiling", pd.Series(dtype=bool)).astype(bool)]
     if not flagged.empty:

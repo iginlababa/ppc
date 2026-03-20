@@ -21,17 +21,24 @@
 #include <string>
 #include <vector>
 
+#include "gpu_compat.h"
 #include "sptrsv_common.h"
 
+#ifdef __HIP_PLATFORM_AMD__
+using SptrsExecPolicy = RAJA::hip_exec<SPTRSV_BLOCK_SIZE>;
+using SptrsSyncPolicy = RAJA::hip_synchronize;
+#else
 using SptrsExecPolicy = RAJA::cuda_exec<SPTRSV_BLOCK_SIZE>;
+using SptrsSyncPolicy = RAJA::cuda_synchronize;
+#endif
 
-// ── CUDA helpers (RAJA kernels use raw device pointers) ───────────────────────
-#define CUDA_CHECK(call)                                                        \
+// ── GPU helpers (RAJA kernels use raw device pointers) ────────────────────────
+#define GPU_CHECK(call)                                                         \
     do {                                                                        \
-        cudaError_t _e = (call);                                                \
-        if (_e != cudaSuccess) {                                                \
-            std::fprintf(stderr, "CUDA error %s:%d: %s\n",                     \
-                         __FILE__, __LINE__, cudaGetErrorString(_e));           \
+        gpuError_t _e = (call);                                                 \
+        if (_e != gpuSuccess) {                                                 \
+            std::fprintf(stderr, "GPU error %s:%d: %s\n",                      \
+                         __FILE__, __LINE__, gpuGetErrorString(_e));            \
             std::exit(1);                                                       \
         }                                                                       \
     } while (0)
@@ -59,7 +66,7 @@ void run_sptrsv_level_raja(
             }
             d_x[row] = sum / diag;
         });
-    RAJA::synchronize<RAJA::cuda_synchronize>();
+    RAJA::synchronize<SptrsSyncPolicy>();
 }
 
 static void print_usage(const char* prog) {
@@ -105,18 +112,18 @@ int main(int argc, char** argv) {
 
         int*    d_rp; int*    d_ci;  double* d_val;
         double* d_b;  double* d_x;   int*    d_lr;
-        CUDA_CHECK(cudaMalloc(&d_rp,  (vcsr.nrows + 1) * sizeof(int)));
-        CUDA_CHECK(cudaMalloc(&d_ci,  vcsr.nnz * sizeof(int)));
-        CUDA_CHECK(cudaMalloc(&d_val, vcsr.nnz * sizeof(double)));
-        CUDA_CHECK(cudaMalloc(&d_b,   vcsr.nrows * sizeof(double)));
-        CUDA_CHECK(cudaMalloc(&d_x,   vcsr.nrows * sizeof(double)));
-        CUDA_CHECK(cudaMalloc(&d_lr,  vcsr.nrows * sizeof(int)));
-        CUDA_CHECK(cudaMemcpy(d_rp,  vcsr.row_ptr.data(),   (vcsr.nrows+1)*sizeof(int),   cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_ci,  vcsr.col_idx.data(),   vcsr.nnz*sizeof(int),          cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_val, vcsr.values.data(),    vcsr.nnz*sizeof(double),       cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_b,   vb.data(),             vcsr.nrows*sizeof(double),     cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_lr,  vls.level_rows.data(), vcsr.nrows*sizeof(int),        cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemset(d_x, 0, vcsr.nrows * sizeof(double)));
+        GPU_CHECK(gpuMalloc(&d_rp,  (vcsr.nrows + 1) * sizeof(int)));
+        GPU_CHECK(gpuMalloc(&d_ci,  vcsr.nnz * sizeof(int)));
+        GPU_CHECK(gpuMalloc(&d_val, vcsr.nnz * sizeof(double)));
+        GPU_CHECK(gpuMalloc(&d_b,   vcsr.nrows * sizeof(double)));
+        GPU_CHECK(gpuMalloc(&d_x,   vcsr.nrows * sizeof(double)));
+        GPU_CHECK(gpuMalloc(&d_lr,  vcsr.nrows * sizeof(int)));
+        GPU_CHECK(gpuMemcpy(d_rp,  vcsr.row_ptr.data(),   (vcsr.nrows+1)*sizeof(int),   gpuMemcpyHostToDevice));
+        GPU_CHECK(gpuMemcpy(d_ci,  vcsr.col_idx.data(),   vcsr.nnz*sizeof(int),          gpuMemcpyHostToDevice));
+        GPU_CHECK(gpuMemcpy(d_val, vcsr.values.data(),    vcsr.nnz*sizeof(double),       gpuMemcpyHostToDevice));
+        GPU_CHECK(gpuMemcpy(d_b,   vb.data(),             vcsr.nrows*sizeof(double),     gpuMemcpyHostToDevice));
+        GPU_CHECK(gpuMemcpy(d_lr,  vls.level_rows.data(), vcsr.nrows*sizeof(int),        gpuMemcpyHostToDevice));
+        GPU_CHECK(gpuMemset(d_x, 0, vcsr.nrows * sizeof(double)));
 
         for (int l = 0; l < vls.n_levels; l++) {
             int lstart = vls.level_ptr[l];
@@ -125,9 +132,9 @@ int main(int argc, char** argv) {
         }
 
         std::vector<double> res(vcsr.nrows);
-        CUDA_CHECK(cudaMemcpy(res.data(), d_x, vcsr.nrows*sizeof(double), cudaMemcpyDeviceToHost));
-        cudaFree(d_rp); cudaFree(d_ci); cudaFree(d_val);
-        cudaFree(d_b);  cudaFree(d_x);  cudaFree(d_lr);
+        GPU_CHECK(gpuMemcpy(res.data(), d_x, vcsr.nrows*sizeof(double), gpuMemcpyDeviceToHost));
+        gpuFree(d_rp); gpuFree(d_ci); gpuFree(d_val);
+        gpuFree(d_b);  gpuFree(d_x);  gpuFree(d_lr);
 
         double max_err = 0.0;
         bool ok = sptrsv_verify(res.data(), ref.data(), vcsr.nrows, SPTRSV_CORRECT_TOL, &max_err);
@@ -155,18 +162,18 @@ int main(int argc, char** argv) {
 
     int*    d_rp; int*    d_ci;  double* d_val;
     double* d_b;  double* d_x;   int*    d_lr;
-    CUDA_CHECK(cudaMalloc(&d_rp,  (nrows + 1) * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_ci,  nnz * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_val, nnz * sizeof(double)));
-    CUDA_CHECK(cudaMalloc(&d_b,   nrows * sizeof(double)));
-    CUDA_CHECK(cudaMalloc(&d_x,   nrows * sizeof(double)));
-    CUDA_CHECK(cudaMalloc(&d_lr,  nrows * sizeof(int)));
-    CUDA_CHECK(cudaMemcpy(d_rp,  csr.row_ptr.data(),   (nrows+1)*sizeof(int),   cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_ci,  csr.col_idx.data(),   nnz*sizeof(int),          cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_val, csr.values.data(),    nnz*sizeof(double),       cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_b,   b.data(),             nrows*sizeof(double),     cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_lr,  ls.level_rows.data(), nrows*sizeof(int),        cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemset(d_x, 0, nrows * sizeof(double)));
+    GPU_CHECK(gpuMalloc(&d_rp,  (nrows + 1) * sizeof(int)));
+    GPU_CHECK(gpuMalloc(&d_ci,  nnz * sizeof(int)));
+    GPU_CHECK(gpuMalloc(&d_val, nnz * sizeof(double)));
+    GPU_CHECK(gpuMalloc(&d_b,   nrows * sizeof(double)));
+    GPU_CHECK(gpuMalloc(&d_x,   nrows * sizeof(double)));
+    GPU_CHECK(gpuMalloc(&d_lr,  nrows * sizeof(int)));
+    GPU_CHECK(gpuMemcpy(d_rp,  csr.row_ptr.data(),   (nrows+1)*sizeof(int),   gpuMemcpyHostToDevice));
+    GPU_CHECK(gpuMemcpy(d_ci,  csr.col_idx.data(),   nnz*sizeof(int),          gpuMemcpyHostToDevice));
+    GPU_CHECK(gpuMemcpy(d_val, csr.values.data(),    nnz*sizeof(double),       gpuMemcpyHostToDevice));
+    GPU_CHECK(gpuMemcpy(d_b,   b.data(),             nrows*sizeof(double),     gpuMemcpyHostToDevice));
+    GPU_CHECK(gpuMemcpy(d_lr,  ls.level_rows.data(), nrows*sizeof(int),        gpuMemcpyHostToDevice));
+    GPU_CHECK(gpuMemset(d_x, 0, nrows * sizeof(double)));
 
     const char* mstr = matrix_type_str(mtype);
 
@@ -179,7 +186,7 @@ int main(int argc, char** argv) {
     };
 
     auto run_with_reset = [&]() {
-        CUDA_CHECK(cudaMemset(d_x, 0, nrows * sizeof(double)));
+        GPU_CHECK(gpuMemset(d_x, 0, nrows * sizeof(double)));
         run_solve();
     };
 
@@ -189,7 +196,7 @@ int main(int argc, char** argv) {
     std::vector<double> gflops_vec;
     gflops_vec.reserve(reps);
     for (int r = 1; r <= reps; r++) {
-        CUDA_CHECK(cudaMemset(d_x, 0, nrows * sizeof(double)));
+        GPU_CHECK(gpuMemset(d_x, 0, nrows * sizeof(double)));
         auto t0 = std::chrono::high_resolution_clock::now();
         run_solve();
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -208,7 +215,7 @@ int main(int argc, char** argv) {
     sptrsv_print_summary(nrows, nnz, ls.n_levels, ls.max_lw, ls.min_lw,
                          mstr, stats, warmup_iters);
 
-    cudaFree(d_rp); cudaFree(d_ci); cudaFree(d_val);
-    cudaFree(d_b);  cudaFree(d_x);  cudaFree(d_lr);
+    gpuFree(d_rp); gpuFree(d_ci); gpuFree(d_val);
+    gpuFree(d_b);  gpuFree(d_x);  gpuFree(d_lr);
     return 0;
 }

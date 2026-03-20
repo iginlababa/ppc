@@ -61,37 +61,38 @@ SIZES[large]=8192
 # ── Matrix types (D2) ─────────────────────────────────────────────────────────
 ALL_MATRICES=(lower_triangular_laplacian lower_triangular_random)
 
+# ── Platform vendor ───────────────────────────────────────────────────────────
+VENDOR="${PLATFORM%%_*}"   # "nvidia" or "amd"
+
 # ── Abstraction registry ──────────────────────────────────────────────────────
 declare -A BINARY_NAME
+declare -A BINARY_DIR
 declare -A CSV_LABEL
 
-BINARY_NAME[native]="sptrsv-cuda"
+if [[ "${VENDOR}" == "amd" ]]; then
+    BINARY_NAME[native]="sptrsv-hip"
+    BINARY_DIR[native]="hip"
+    ALL_ABSTRACTIONS=(native kokkos raja sycl julia)
+    export JULIA_GPU_BACKEND="amdgpu"
+else
+    BINARY_NAME[native]="sptrsv-cuda"
+    BINARY_DIR[native]="cuda"
+    ALL_ABSTRACTIONS=(native kokkos raja julia)
+    # numba: UNSUPPORTED_CC120; sycl: NO_COMPILER on RTX 5060 — not in run list
+fi
+
 CSV_LABEL[native]="native"
 
-BINARY_NAME[kokkos]="sptrsv-kokkos"
-CSV_LABEL[kokkos]="kokkos"
-
-BINARY_NAME[raja]="sptrsv-raja"
-CSV_LABEL[raja]="raja"
-
-BINARY_NAME[julia]="sptrsv-julia"
-CSV_LABEL[julia]="julia"
-
-ALL_ABSTRACTIONS=(native kokkos raja julia)
-# numba: UNSUPPORTED_CC120; sycl: NO_COMPILER — not in run list.
+BINARY_NAME[kokkos]="sptrsv-kokkos"; BINARY_DIR[kokkos]="kokkos"; CSV_LABEL[kokkos]="kokkos"
+BINARY_NAME[raja]="sptrsv-raja";     BINARY_DIR[raja]="raja";     CSV_LABEL[raja]="raja"
+BINARY_NAME[sycl]="sptrsv-sycl";     BINARY_DIR[sycl]="sycl";     CSV_LABEL[sycl]="sycl"
+BINARY_NAME[julia]="sptrsv-julia";   BINARY_DIR[julia]="julia";   CSV_LABEL[julia]="julia"
 
 # ── Binary finder ─────────────────────────────────────────────────────────────
 find_binary() {
     local abs="$1"
     local bin_name="${BINARY_NAME[$abs]}"
-    local dir_stem
-    case "${abs}" in
-        native)  dir_stem="cuda"   ;;
-        kokkos)  dir_stem="kokkos" ;;
-        raja)    dir_stem="raja"   ;;
-        julia)   dir_stem="julia"  ;;
-        *)       dir_stem="${abs}" ;;
-    esac
+    local dir_stem="${BINARY_DIR[$abs]:-${abs}}"
 
     local p="${BUILD_BASE}/${dir_stem}_${PLATFORM}/${bin_name}"
     [[ -x "${p}" ]] && { echo "${p}"; return 0; }
@@ -178,7 +179,11 @@ echo "[run_sptrsv] Reps:          ${REPS}"
 echo "[run_sptrsv] Sizes:         ${run_sizes[*]}"
 echo "[run_sptrsv] Abstractions:  ${run_abstractions[*]}"
 echo "[run_sptrsv] Matrix types:  ${run_matrices[*]}"
-echo "[run_sptrsv] Note:          numba=UNSUPPORTED_CC120, sycl=NO_COMPILER"
+if [[ "${VENDOR}" == "amd" ]]; then
+    echo "[run_sptrsv] Note:          numba=SKIP (numba-hip experimental)"
+else
+    echo "[run_sptrsv] Note:          numba=UNSUPPORTED_CC120, sycl=NO_COMPILER"
+fi
 echo "[run_sptrsv] ================================================================"
 
 # ── Main loop ─────────────────────────────────────────────────────────────────

@@ -25,17 +25,28 @@ abstractions:
   - native
   - kokkos
   - raja
-  - sycl         # partial — may not have full implementation
-  - julia        # partial — level-set parallelism experimental in Julia
+  - sycl
+  - julia
 
 platforms:
-  - nvidia_a100
-  - amd_mi250x
-  - intel_pvc
+  - nvidia_rtx5060
+  - amd_mi300x
+
+platform_abstractions:
+  nvidia_rtx5060: [native, kokkos, raja, julia]
+  # numba: UNSUPPORTED_CC120; sycl: NO_COMPILER on RTX 5060
+  amd_mi300x: [native, kokkos, raja, sycl, julia]
+  # numba-hip experimental — not included
+
+platform_notes:
+  amd_mi300x:
+    native: "sptrsv-hip binary (HIP port of CUDA kernel — identical kernel body)"
+    sycl: "AdaptiveCpp (acpp) --acpp-targets=hip:gfx942; HSA dispatch overhead × n_levels expected to be significant — predict poor tier"
+    julia: "JULIA_GPU_BACKEND=amdgpu; @roc launch overhead × n_levels — same concern as SYCL"
 
 availability_notes:
-  sycl: "Level-set SpTRSV not in all SYCL implementations — mark partial if absent"
-  julia: "Experimental — do not block paper on Julia SpTRSV"
+  sycl: "Full level-set implementation via SYCL USM nd_range<1> + q.wait() per level"
+  julia: "AMDGPU.jl @eval pattern for backend dispatch; fill!(d_x, 0.0) reset between reps"
 
 notes:
   - "Sequential dependencies require level-set parallelism"

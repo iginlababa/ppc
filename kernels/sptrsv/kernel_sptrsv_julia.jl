@@ -1,21 +1,49 @@
 #!/usr/bin/env julia
-# kernel_sptrsv_julia.jl — E5 SpTRSV: Julia/CUDA.jl level-set forward substitution.
+# kernel_sptrsv_julia.jl — E5 SpTRSV: Julia GPU level-set forward substitution.
+#                          Supports CUDA.jl (NVIDIA) and AMDGPU.jl (AMD).
 #
 # E5 DESIGN DECISIONS
-# [D3-Julia] @cuda kernel: one thread per row within each level. Outer loop over
-#   levels in Julia on the host. CUDA.synchronize() between levels ensures all
+# [D3-Julia] @cuda/@roc kernel: one thread per row within each level. Outer loop
+#   over levels in Julia on the host. GPU synchronize() between levels ensures all
 #   x writes from level l are visible before level l+1's kernel reads them.
-#   level_rows is a CuArray{Int32} of row indices (0-indexed C-style).
+#   level_rows is a GPU array of Int32 row indices (0-indexed C-style).
 #   row_ptr, col_idx: Int32 (0-indexed); values, b, x: Float64.
-#   The kernel accesses level_rows[level_start+tid] to get its row index, then
-#   performs forward substitution over that row's CSR entries.
 # [D7-Julia] Adaptive warmup: CV < 2% over last 10 timings. x is reset via
-#   CUDA.fill! before each warmup iteration. Timed region excludes the fill.
+#   fill! before each warmup iteration. Timed region excludes the fill.
+# [D-AMD] Backend selected by JULIA_GPU_BACKEND env var:
+#   "amdgpu" → AMDGPU.jl (@roc kernel, ROCArray, workgroupIdx/workitemIdx)
+#   default  → CUDA.jl  (@cuda kernel, CuArray, blockIdx/threadIdx)
 # P001 note: Julia SpTRSV has n_levels kernel launches per solve (vs 1 for SpMV).
-#   P001 Launch Overhead Dominance is expected to compound multiplicatively with
-#   P007 Load Imbalance Amplification for irregular matrices.
+#   P001 Launch Overhead Dominance compounded by n_levels is the key finding.
 
-using CUDA
+const _GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "cuda")
+
+if _GPU_BACKEND == "amdgpu"
+    using AMDGPU
+    @eval _gpu_array(x)     = ROCArray(x)
+    @eval _gpu_zeros_f64(n) = AMDGPU.zeros(Float64, n)
+    @eval @inline _threadIdx() = workitemIdx()
+    @eval @inline _blockIdx()  = workgroupIdx()
+    @eval @inline _blockDim()  = workgroupDim()
+    @eval function _sptrsv_level_launch!(rp, ci, val, b, x, lr, lstart::Int32, lsize::Int32, grid::Int)
+        @roc groupsize=SPTRSV_BLOCK_SIZE gridsize=grid sptrsv_level_kernel!(
+            rp, ci, val, b, x, lr, lstart, lsize)
+        AMDGPU.synchronize()
+    end
+else
+    using CUDA
+    @eval _gpu_array(x)     = CuArray(x)
+    @eval _gpu_zeros_f64(n) = CUDA.zeros(Float64, n)
+    @eval @inline _threadIdx() = threadIdx()
+    @eval @inline _blockIdx()  = blockIdx()
+    @eval @inline _blockDim()  = blockDim()
+    @eval function _sptrsv_level_launch!(rp, ci, val, b, x, lr, lstart::Int32, lsize::Int32, grid::Int)
+        @cuda threads=SPTRSV_BLOCK_SIZE blocks=grid sptrsv_level_kernel!(
+            rp, ci, val, b, x, lr, lstart, lsize)
+        CUDA.synchronize()
+    end
+end
+
 using Printf: @printf
 using Statistics: median, mean, quantile, std
 using Random: MersenneTwister
@@ -39,7 +67,7 @@ const SPTRSV_N_LARGE      = 8192
 # level_start: 0-based index into level_rows array.
 function sptrsv_level_kernel!(row_ptr, col_idx, values, b, x,
                                level_rows, level_start::Int32, level_size::Int32)
-    tid = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x - Int32(1)
+    tid = (_blockIdx().x - Int32(1)) * _blockDim().x + _threadIdx().x - Int32(1)
     if tid < level_size
         row   = level_rows[level_start + tid + Int32(1)]  # 0-indexed row
         s     = b[row + Int32(1)]
@@ -264,20 +292,19 @@ function verify_sptrsv(mtype::String)::Bool
 
     lptr, lrows, n_levels, _, _ = build_levels(rp, ci, nrows)
 
-    d_rp  = CuArray(rp)
-    d_ci  = CuArray(ci)
-    d_val = CuArray(val)
-    d_b   = CuArray(b)
-    d_x   = CUDA.zeros(Float64, nrows)
-    d_lr  = CuArray(lrows)
+    d_rp  = _gpu_array(rp)
+    d_ci  = _gpu_array(ci)
+    d_val = _gpu_array(val)
+    d_b   = _gpu_array(b)
+    d_x   = _gpu_zeros_f64(nrows)
+    d_lr  = _gpu_array(lrows)
 
     for l in 0:n_levels-1
-        lstart  = lptr[l + 1]
-        lsize   = lptr[l + 2] - lstart
-        grid    = cld(lsize, SPTRSV_BLOCK_SIZE)
-        @cuda threads=SPTRSV_BLOCK_SIZE blocks=grid sptrsv_level_kernel!(
-            d_rp, d_ci, d_val, d_b, d_x, d_lr, Int32(lstart), Int32(lsize))
-        CUDA.synchronize()
+        lstart = lptr[l + 1]
+        lsize  = lptr[l + 2] - lstart
+        grid   = cld(lsize, SPTRSV_BLOCK_SIZE)
+        _sptrsv_level_launch!(d_rp, d_ci, d_val, d_b, d_x, d_lr,
+                               Int32(lstart), Int32(lsize), grid)
     end
     result = Array(d_x)
 
@@ -302,29 +329,27 @@ function run_sptrsv(mtype::String, N::Int, warmup_max::Int, reps::Int, platform:
             mtype, nrows, nnz, n_levels, max_lw, min_lw, warmup_max, reps, platform)
     flush(stdout)
 
-    d_rp  = CuArray(rp)
-    d_ci  = CuArray(ci)
-    d_val = CuArray(val)
-    d_b   = CuArray(b)
-    d_x   = CUDA.zeros(Float64, nrows)
-    d_lr  = CuArray(lrows)
+    d_rp  = _gpu_array(rp)
+    d_ci  = _gpu_array(ci)
+    d_val = _gpu_array(val)
+    d_b   = _gpu_array(b)
+    d_x   = _gpu_zeros_f64(nrows)
+    d_lr  = _gpu_array(lrows)
 
     # Pre-compute grid sizes per level
-    level_grids = [cld(Int(lptr[l + 2] - lptr[l + 1]), SPTRSV_BLOCK_SIZE) for l in 0:n_levels-1]
+    level_grids  = [cld(Int(lptr[l + 2] - lptr[l + 1]), SPTRSV_BLOCK_SIZE) for l in 0:n_levels-1]
     level_starts = [Int32(lptr[l + 1]) for l in 0:n_levels-1]
     level_sizes  = [Int32(lptr[l + 2] - lptr[l + 1]) for l in 0:n_levels-1]
 
     function run_solve!()
         for l in 1:n_levels
-            @cuda threads=SPTRSV_BLOCK_SIZE blocks=level_grids[l] sptrsv_level_kernel!(
-                d_rp, d_ci, d_val, d_b, d_x, d_lr,
-                level_starts[l], level_sizes[l])
-            CUDA.synchronize()
+            _sptrsv_level_launch!(d_rp, d_ci, d_val, d_b, d_x, d_lr,
+                                   level_starts[l], level_sizes[l], level_grids[l])
         end
     end
 
     function run_with_reset!()
-        CUDA.fill!(d_x, 0.0)
+        fill!(d_x, 0.0)
         run_solve!()
     end
 
@@ -335,7 +360,7 @@ function run_sptrsv(mtype::String, N::Int, warmup_max::Int, reps::Int, platform:
     sizehint!(gflops_vec, reps)
     mstr = mtype
     for r in 1:reps
-        CUDA.fill!(d_x, 0.0)
+        fill!(d_x, 0.0)
         t0 = time_ns()
         run_solve!()
         t1 = time_ns()
