@@ -35,7 +35,13 @@
 #include <string>
 #include <vector>
 
-#include <cuda_runtime.h>
+// Include the appropriate GPU runtime header.
+// Compile with -DNBODY_USE_HIP to select the HIP path.
+#ifdef NBODY_USE_HIP
+#  include <hip/hip_runtime.h>
+#else
+#  include <cuda_runtime.h>
+#endif
 
 // ── Physical constants ─────────────────────────────────────────────────────────
 static constexpr float NBODY_R_CUT      = 2.5f;
@@ -48,7 +54,7 @@ static constexpr float NBODY_JITTER     = 0.01f;     // ±0.01 σ position pertu
 static constexpr int NBODY_BLOCK_SIZE   = 256;
 static constexpr int NBODY_TILE_SIZE    = 24;        // shared-memory tile width
 // NOTE: BLOCK_SIZE × TILE_SIZE × sizeof(float4) must fit in sharedMemPerBlockOptin.
-//       RTX 5060 Laptop: sharedMemPerBlockOptin = 101376 bytes (≈99 KB).
+//       RTX 5060: sharedMemPerBlockOptin = 101376 bytes (≈99 KB).
 //       256 × 24 × 16 = 98304 bytes < 101376. (32 would exceed limit on this GPU.)
 static constexpr int NBODY_WARMUP       = 50;        // E1 fixed warmup iterations
 static constexpr int NBODY_FLOPS_PAIR   = 20;        // canonical LJ FLOP count
@@ -59,7 +65,20 @@ static constexpr int NBODY_N_SMALL      =   4000;    // M=10
 static constexpr int NBODY_N_MEDIUM     =  32000;    // M=20
 static constexpr int NBODY_N_LARGE      = 256000;    // M=40
 
-// ── CUDA error helper ──────────────────────────────────────────────────────────
+// ── GPU error helpers ─────────────────────────────────────────────────────────
+#ifdef NBODY_USE_HIP
+#define HIP_CHECK(call)                                                            \
+    do {                                                                           \
+        hipError_t _e = (call);                                                    \
+        if (_e != hipSuccess) {                                                    \
+            std::fprintf(stderr, "HIP error at %s:%d — %s\n",                     \
+                         __FILE__, __LINE__, hipGetErrorString(_e));               \
+            std::exit(EXIT_FAILURE);                                               \
+        }                                                                          \
+    } while (0)
+// Alias so shared code can use CUDA_CHECK unchanged when porting.
+#define CUDA_CHECK HIP_CHECK
+#else
 #define CUDA_CHECK(call)                                                           \
     do {                                                                           \
         cudaError_t _e = (call);                                                   \
@@ -69,6 +88,7 @@ static constexpr int NBODY_N_LARGE      = 256000;    // M=40
             std::exit(EXIT_FAILURE);                                               \
         }                                                                          \
     } while (0)
+#endif
 
 // ── CSR neighbor list ──────────────────────────────────────────────────────────
 struct NbodyCSR {
@@ -229,7 +249,7 @@ static NbodyConfig nbody_parse_args(int argc, char** argv) {
     cfg.box_len    = 40.0f * NBODY_FCC_A;
     cfg.reps       = 30;
     cfg.verify     = false;
-    cfg.platform   = "nvidia_rtx5060_laptop";
+    cfg.platform   = "nvidia_rtx5060";
     cfg.kernel     = "notile";
     cfg.size_label = "large";
 
