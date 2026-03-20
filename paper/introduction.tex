@@ -45,16 +45,19 @@ our measurements, Julia/\textsc{cuda.jl} delivers $1.25\times$ native DGEMM
 throughput via a memory layout advantage (P005), yet collapses to $0.35\times$
 efficiency on narrow BFS frontiers through per-launch dispatch amplification
 (P008)---the same framework producing opposite outcomes on adjacent workloads,
-depending solely on problem structure.
+depending solely on problem structure. On AMD CDNA3 (MI300X), Julia's
+column-major layout advantage disappears entirely: the same Julia/ROCm kernel
+delivers only $0.31\times$ native DGEMM throughput (P005 reversal), confirming
+that abstraction outcomes are architecture-specific, not merely workload-specific.
 
 This paper addresses this gap by presenting a \emph{measurement-driven
 framework for selective abstraction} in GPU-accelerated HPC software. The
 framework systematically characterizes abstraction effectiveness across a
 three-dimensional experimental matrix: seven representative workloads spanning
 regular (STREAM Triad, DGEMM, 3D Stencil), semi-irregular (SpMV, SpTRSV), and
-irregular (BFS, N-body) computational patterns; four abstraction layers (Kokkos,
-RAJA, SYCL, Julia) evaluated against native CUDA/HIP/SYCL baselines; and three
-GPU architectures covering NVIDIA Blackwell (RTX 5060), AMD CDNA2 (MI250X), and
+irregular (BFS, N-body) computational patterns; five abstraction layers (Kokkos,
+RAJA, SYCL, Julia, Numba) evaluated against native CUDA/HIP/SYCL baselines; and three
+GPU architectures covering NVIDIA Blackwell (RTX 5060), AMD CDNA3 (MI300X), and
 Intel Ponte Vecchio (GPU Max 1550). Using a four-level measurement hierarchy---performance
 portability coefficients~\cite{Pennycook2019}, overhead attribution, root cause
 analysis, and productivity metrics---we construct an empirical taxonomy of
