@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
-# stream-amdgpu — wrapper that invokes kernel_stream_amdgpu.jl via Julia 1.12+.
+# stream-amdgpu — wrapper that invokes kernel_stream_julia.jl with AMDGPU.jl backend.
 #
 # Requires Julia >= 1.12 (LLVM 18, gfx942 support) + AMDGPU.jl >= 2.0.
-# The juliaup rc channel (julia+rc) is used if the default julia is < 1.12.
+# Sets JULIA_GPU_BACKEND=amdgpu so the unified kernel selects the ROCm path.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JL_SCRIPT="${SCRIPT_DIR}/kernel_stream_amdgpu.jl"
+JL_SCRIPT="${SCRIPT_DIR}/kernel_stream_julia.jl"
 
-# Prefer julia+rc (1.12) which has LLVM 18 / gfx942 support.
-# Fall back to whatever julia is on PATH.
-if command -v julia &>/dev/null; then
-    JULIA_BIN="julia"
-else
+JULIA_BIN="${JULIA_BIN:-julia}"
+if ! command -v "${JULIA_BIN}" &>/dev/null; then
     echo "ERROR: julia not found on PATH" >&2
     exit 1
 fi
 
-exec "${JULIA_BIN}" --startup-file=no "${JL_SCRIPT}" "$@"
+export JULIA_GPU_BACKEND=amdgpu
+
+exec "${JULIA_BIN}" \
+    --project="${SCRIPT_DIR}" \
+    --startup-file=no \
+    --optimize=3 \
+    "${JL_SCRIPT}" \
+    "$@"
