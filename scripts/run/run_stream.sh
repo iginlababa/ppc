@@ -141,10 +141,51 @@ find_binary() {
 # Queries the base application clock and attempts to lock the GPU to it.
 # On laptop GPUs nvidia-smi may report "Not Supported" — this is handled
 # gracefully; measurements still proceed with a warning.
+# On AMD platforms (amd_*) rocm-smi performance determinism is used instead.
 
 GPU_BASE_CLOCK=""   # populated by lock_gpu_clocks(), used for reporting
 
 lock_gpu_clocks() {
+    local vendor="${PLATFORM%%_*}"
+
+    if [[ "${vendor}" == "amd" ]]; then
+        # AMD: enable per-device performance determinism mode.
+        # rocm-smi --setperfdeterminism <freq_mhz> locks the sclk to a fixed
+        # value; the highest stable sclk is read from --showsclk first.
+        if ! command -v rocm-smi &>/dev/null; then
+            echo "  WARN  clock-lock: rocm-smi not found — skipping"
+            return
+        fi
+        local max_clk
+        # Format 1: bare-metal list with active clock marked by '*'  →  * 2100Mhz
+        max_clk="$(rocm-smi --showsclk 2>/dev/null \
+                   | grep -oP '\*\s+\K[0-9]+(?=Mhz)' | tail -1 || true)"
+        # Format 2: VF / range output  →  Valid sclk range: 500Mhz - 2100Mhz
+        if [[ -z "${max_clk}" ]]; then
+            max_clk="$(rocm-smi --showsclk 2>/dev/null \
+                       | grep -oP 'range:.*?-\s*\K[0-9]+(?=Mhz)' | tail -1 || true)"
+        fi
+        if [[ -z "${max_clk}" ]]; then
+            echo "  WARN  clock-lock: could not read max sclk from rocm-smi — skipping"
+            return
+        fi
+        GPU_BASE_CLOCK="${max_clk}"
+        local locked=0
+        if rocm-smi --setperfdeterminism "${max_clk}" > /dev/null 2>&1; then
+            locked=1
+        elif sudo -n rocm-smi --setperfdeterminism "${max_clk}" > /dev/null 2>&1; then
+            locked=1
+        fi
+        if [[ ${locked} -eq 1 ]]; then
+            echo "  GPU   AMD perf-determinism locked at ${GPU_BASE_CLOCK} MHz (sclk)"
+        else
+            echo "  WARN  clock-lock: rocm-smi --setperfdeterminism failed — continuing"
+            GPU_BASE_CLOCK=""
+        fi
+        return
+    fi
+
+    # NVIDIA path ──────────────────────────────────────────────────────────────
     # nvidia-smi --query-gpu=clocks.applications.gr returns e.g. "1890 MHz"
     local raw
     raw="$(nvidia-smi --query-gpu=clocks.applications.gr \
@@ -179,6 +220,13 @@ lock_gpu_clocks() {
 
 reset_gpu_clocks() {
     [[ -z "${GPU_BASE_CLOCK}" ]] && return
+    local vendor="${PLATFORM%%_*}"
+    if [[ "${vendor}" == "amd" ]]; then
+        rocm-smi --resetperfdeterminism > /dev/null 2>&1 \
+            || sudo -n rocm-smi --resetperfdeterminism > /dev/null 2>&1 \
+            || true
+        return
+    fi
     nvidia-smi --reset-gpu-clocks > /dev/null 2>&1 \
         || sudo -n nvidia-smi --reset-gpu-clocks > /dev/null 2>&1 \
         || true

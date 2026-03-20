@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(stream_kernels LANGUAGES CXX CUDA)
+# HIP-only builds (AMD) must not require the CUDA toolkit.
+# -DSTREAM_ENABLE_HIP=ON is set in the cache before project() runs, so this
+# check correctly skips the CUDA language when hipcc is the sole compiler.
+if(DEFINED STREAM_ENABLE_HIP AND STREAM_ENABLE_HIP)
+    project(stream_kernels LANGUAGES CXX)
+else()
+    project(stream_kernels LANGUAGES CXX CUDA)
+endif()
 
 # Kokkos must be found before project() declares languages if using the
 # Kokkos compiler-launcher approach.  Here we use find_package post-project,
@@ -9,7 +16,28 @@ project(stream_kernels LANGUAGES CXX CUDA)
 
 # ── Standards ─────────────────────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# ROCm's hipcc/clang may not be in CMake's known-features list; disable the
+# hard REQUIRED check so we fall back to the -std=c++17 flag instead.
+if(DEFINED STREAM_ENABLE_HIP AND STREAM_ENABLE_HIP)
+    set(CMAKE_CXX_STANDARD_REQUIRED OFF)
+    # CMake 3.28 has no compiler-feature database entry for ROCm Clang 17/18.
+    # RAJA's BLT cmake calls target_compile_features(blt_hip INTERFACE cxx_std_XX),
+    # which aborts the Generate step with "No known features".  Pre-populate the
+    # feature lists so CMake accepts the requirement without querying the DB.
+    set(CMAKE_CXX_COMPILE_FEATURES
+        cxx_std_11 cxx_std_14 cxx_std_17 cxx_std_20
+        cxx_alias_templates cxx_auto_type cxx_constexpr cxx_decltype
+        cxx_defaulted_functions cxx_deleted_functions cxx_final
+        cxx_lambdas cxx_noexcept cxx_nullptr cxx_override
+        cxx_range_for cxx_rvalue_references cxx_static_assert
+        cxx_thread_local cxx_trailing_return_types cxx_variadic_templates)
+    set(CMAKE_CXX11_COMPILE_FEATURES cxx_std_11)
+    set(CMAKE_CXX14_COMPILE_FEATURES cxx_std_14)
+    set(CMAKE_CXX17_COMPILE_FEATURES cxx_std_17)
+    set(CMAKE_CXX20_COMPILE_FEATURES cxx_std_20)
+else()
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+endif()
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
@@ -27,39 +55,47 @@ message(STATUS "Building for CUDA arch: ${CMAKE_CUDA_ARCHITECTURES}")
 option(STREAM_USE_FLOAT "Use single precision (default: double)" OFF)
 
 # ── CUDA native baseline (abstraction=native on NVIDIA) ──────────────────────
-add_executable(stream-cuda kernel_stream_cuda.cu)
+# Skipped when building HIP-only (AMD): no CUDA language is enabled.
+if(NOT (DEFINED STREAM_ENABLE_HIP AND STREAM_ENABLE_HIP))
+    add_executable(stream-cuda kernel_stream_cuda.cu)
 
-target_include_directories(stream-cuda PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(stream-cuda PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-set_target_properties(stream-cuda PROPERTIES
-    OUTPUT_NAME     "stream-cuda"
-    CUDA_SEPARABLE_COMPILATION OFF   # no device linking needed
-    CUDA_RESOLVE_DEVICE_SYMBOLS OFF
-)
+    set_target_properties(stream-cuda PROPERTIES
+        OUTPUT_NAME     "stream-cuda"
+        CUDA_SEPARABLE_COMPILATION OFF   # no device linking needed
+        CUDA_RESOLVE_DEVICE_SYMBOLS OFF
+    )
 
-target_compile_options(stream-cuda PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:
-        -O3
-        --use_fast_math
-        --generate-line-info
-        -Xcompiler=-Wall,-Wextra
-    >
-    $<$<COMPILE_LANGUAGE:CXX>:
-        -O3
-        -Wall
-        -Wextra
-    >
-)
+    target_compile_options(stream-cuda PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:
+            -O3
+            --use_fast_math
+            --generate-line-info
+            -Xcompiler=-Wall,-Wextra
+        >
+        $<$<COMPILE_LANGUAGE:CXX>:
+            -O3
+            -Wall
+            -Wextra
+        >
+    )
 
-if(STREAM_USE_FLOAT)
-    target_compile_definitions(stream-cuda PRIVATE STREAM_USE_FLOAT)
-    message(STATUS "STREAM precision: float")
+    if(STREAM_USE_FLOAT)
+        target_compile_definitions(stream-cuda PRIVATE STREAM_USE_FLOAT)
+        message(STATUS "STREAM precision: float")
+    else()
+        message(STATUS "STREAM precision: double")
+    endif()
+
+    install(TARGETS stream-cuda DESTINATION bin)
 else()
-    message(STATUS "STREAM precision: double")
+    if(STREAM_USE_FLOAT)
+        message(STATUS "STREAM precision: float")
+    else()
+        message(STATUS "STREAM precision: double")
+    endif()
 endif()
-
-# ── Install ───────────────────────────────────────────────────────────────────
-install(TARGETS stream-cuda DESTINATION bin)
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 message(STATUS "")
