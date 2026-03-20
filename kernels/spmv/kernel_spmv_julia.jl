@@ -16,8 +16,26 @@ const _GPU_BACKEND = get(ENV, "JULIA_GPU_BACKEND", "cuda")
 
 if _GPU_BACKEND == "amdgpu"
     using AMDGPU
+    @eval _gpu_array(x)      = ROCArray(x)
+    @eval _gpu_zeros_f64(n)  = AMDGPU.zeros(Float64, n)
+    @eval @inline _threadIdx() = workitemIdx()
+    @eval @inline _blockIdx()  = workgroupIdx()
+    @eval @inline _blockDim()  = workgroupDim()
+    @eval function _spmv_launch!(rp, ci, val, x, y, nrows32::Int32, grid::Int)
+        @roc groupsize=SPMV_BLOCK_SIZE gridsize=grid spmv_csr_kernel!(rp, ci, val, x, y, nrows32)
+        AMDGPU.synchronize()
+    end
 else
     using CUDA
+    @eval _gpu_array(x)      = CuArray(x)
+    @eval _gpu_zeros_f64(n)  = CUDA.zeros(Float64, n)
+    @eval @inline _threadIdx() = threadIdx()
+    @eval @inline _blockIdx()  = blockIdx()
+    @eval @inline _blockDim()  = blockDim()
+    @eval function _spmv_launch!(rp, ci, val, x, y, nrows32::Int32, grid::Int)
+        @cuda threads=SPMV_BLOCK_SIZE blocks=grid spmv_csr_kernel!(rp, ci, val, x, y, nrows32)
+        CUDA.synchronize()
+    end
 end
 
 using Printf: @printf
@@ -38,7 +56,7 @@ const SPMV_SEED         = UInt64(42)
 # values, x, y: Float64.
 # row: 0-indexed.
 function spmv_csr_kernel!(row_ptr, col_idx, values, x, y, nrows::Int32)
-    row = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x - Int32(1)
+    row = (_blockIdx().x - Int32(1)) * _blockDim().x + _threadIdx().x - Int32(1)
     if row < nrows
         s = 0.0
         start = row_ptr[row + Int32(1)] + Int32(1)   # +1 to convert 0→1-indexed Julia array
@@ -213,27 +231,13 @@ function verify_spmv(mtype::String)::Bool
         ref[row + 1] = s
     end
 
-    if _GPU_BACKEND == "amdgpu"
-        d_rp  = ROCArray(rp)
-        d_ci  = ROCArray(ci)
-        d_val = ROCArray(val)
-        d_x   = ROCArray(x)
-        d_y   = AMDGPU.zeros(Float64, nrows)
-        grid  = cld(nrows, SPMV_BLOCK_SIZE)
-        @roc threads=SPMV_BLOCK_SIZE blocks=grid spmv_csr_kernel!(
-            d_rp, d_ci, d_val, d_x, d_y, Int32(nrows))
-        AMDGPU.synchronize()
-    else
-        d_rp  = CuArray(rp)
-        d_ci  = CuArray(ci)
-        d_val = CuArray(val)
-        d_x   = CuArray(x)
-        d_y   = CUDA.zeros(Float64, nrows)
-        grid  = cld(nrows, SPMV_BLOCK_SIZE)
-        @cuda threads=SPMV_BLOCK_SIZE blocks=grid spmv_csr_kernel!(
-            d_rp, d_ci, d_val, d_x, d_y, Int32(nrows))
-        CUDA.synchronize()
-    end
+    d_rp  = _gpu_array(rp)
+    d_ci  = _gpu_array(ci)
+    d_val = _gpu_array(val)
+    d_x   = _gpu_array(x)
+    d_y   = _gpu_zeros_f64(nrows)
+    grid  = cld(nrows, SPMV_BLOCK_SIZE)
+    _spmv_launch!(d_rp, d_ci, d_val, d_x, d_y, Int32(nrows), grid)
     result = Array(d_y)
 
     max_err = 0.0
@@ -262,28 +266,13 @@ function run_spmv(mtype::String, N::Int, warmup_max::Int, reps::Int, platform::S
     nrows32 = Int32(nrows)
     grid    = cld(nrows, SPMV_BLOCK_SIZE)
 
-    if _GPU_BACKEND == "amdgpu"
-        d_rp  = ROCArray(rp)
-        d_ci  = ROCArray(ci)
-        d_val = ROCArray(val)
-        d_x   = ROCArray(x)
-        d_y   = AMDGPU.zeros(Float64, nrows)
-        function run_once!()
-            @roc threads=SPMV_BLOCK_SIZE blocks=grid spmv_csr_kernel!(
-                d_rp, d_ci, d_val, d_x, d_y, nrows32)
-            AMDGPU.synchronize()
-        end
-    else
-        d_rp  = CuArray(rp)
-        d_ci  = CuArray(ci)
-        d_val = CuArray(val)
-        d_x   = CuArray(x)
-        d_y   = CUDA.zeros(Float64, nrows)
-        function run_once!()
-            @cuda threads=SPMV_BLOCK_SIZE blocks=grid spmv_csr_kernel!(
-                d_rp, d_ci, d_val, d_x, d_y, nrows32)
-            CUDA.synchronize()
-        end
+    d_rp  = _gpu_array(rp)
+    d_ci  = _gpu_array(ci)
+    d_val = _gpu_array(val)
+    d_x   = _gpu_array(x)
+    d_y   = _gpu_zeros_f64(nrows)
+    function run_once!()
+        _spmv_launch!(d_rp, d_ci, d_val, d_x, d_y, nrows32, grid)
     end
 
     warmup_iters = adaptive_warmup!(run_once!; warmup_max=warmup_max)
