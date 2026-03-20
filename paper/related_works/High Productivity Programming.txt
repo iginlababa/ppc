@@ -1,0 +1,61 @@
+High-Productivity Programming Systems for HPC Applications
+
+
+This SI is about the central tradeoff of modern HPC:
+
+Higher abstraction = higher productivity
+Lower abstraction = higher control (performance, power, reliability)
+
+High-productivity programming systems are the attempt to cheat this tradeoff.
+
+Not eliminate it.
+Manage it intelligently.
+
+
+exascale systems 
+
+This Special Issue is about how to design programming systems that let humans think less like hardware and machines think more like systems engineers.
+
+
+GOOGLE SCHOLAR SEARCH 
+
+The 5 most important Google Scholar search queries
+
+Use them exactly as written.
+
+1. "high productivity programming models" HPC
+
+This anchors the philosophy of the field.
+You’ll get position papers, surveys, and framing arguments.
+
+2. "task-based runtime systems" HPC
+
+This is the dominant technical mechanism for shifting responsibility from programmer to system.
+
+If you understand this literature, you understand the field.
+
+3. "exascale programming models"
+
+This ties productivity directly to real constraints: scale, faults, power.
+
+It filters out toy systems.
+
+4. "performance portability" heterogeneous HPC
+
+This exposes the hardest unsolved problem in the space.
+
+Every serious system has to confront this.
+
+5. "adaptive runtime systems" HPC
+
+This captures self-awareness, autotuning, and dynamic decision-making.
+
+This aligns directly with the SI’s “self-aware software” language.
+
+If you allow one extra (optional but valuable)
+6. "fault tolerant programming models" exascale
+
+This connects productivity with reliability, not just speed.
+
+
+5_ What does it mean to program HPC systems using tasks and dataflow, and why does this improve productivity?

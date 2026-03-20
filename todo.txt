@@ -13,3 +13,5 @@
   If you want all abstractions in one shot on a new platform (e.g., A100 which should have no RAJA/SYCL build issues):
   ./scripts/build/build_stream.sh --platform nvidia_a100
   ./scripts/run/run_stream.sh --platform nvidia_a100 --size large
+
+

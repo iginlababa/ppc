@@ -1,31 +1,116 @@
 % §1 Introduction
-% Status: Written (stub — fill in after results)
+% Status: Revised 2026-03-20 — full draft with empirical results from E1–E7.
 
 \section{Introduction}
 \label{sec:introduction}
 
-Exascale HPC systems are heterogeneous. Three major GPU vendors --- NVIDIA, AMD, and Intel ---
-each expose different memory hierarchies, execution models, and compiler backends.
-To write portable code, developers use abstraction layers: Kokkos, RAJA, SYCL, and Julia.
-These layers promise portability. They do not always deliver performance.
+Modern exascale systems expose unprecedented hardware heterogeneity---NVIDIA,
+AMD, and Intel GPUs with distinct memory hierarchies, execution models, and
+programming interfaces. Programming these systems productively requires
+abstraction; programming them efficiently often demands its abandonment. Despite
+a decade of investment in portability frameworks, application developers at the
+Exascale Computing Project still rely on native or custom implementations in
+approximately 55\% of production codes~\cite{Evans2022}, and performance
+portability coefficients for leading frameworks collapse to values as low as
+0.20--0.26 on certain architectures~\cite{Godoy2023}. The gap between the
+promise of write-once, run-anywhere portability and the reality of
+production-grade HPC software remains wide, consequential, and poorly
+understood.
 
-The current state of practice is guesswork. Developers choose abstractions based on team familiarity,
-project history, or vendor recommendation --- not evidence. When performance degrades, root cause
-analysis is ad hoc. There is no systematic, measurement-driven framework for making these decisions.
+The community has responded with a rich ecosystem of solutions: portability
+layers such as Kokkos, RAJA, and SYCL that abstract hardware
+targets~\cite{Evans2022,heroux2020ecp}, task-based runtimes such as
+Legion, PaRSEC, and Charm++ that shift scheduling and synchronization
+responsibility into the runtime system~\cite{bauer2012legion,john2023multgpu,chandrasekar2023adaptive},
+and translation-based approaches that preserve existing
+toolchains~\cite{zhao2023hiplz}. Each approach reduces some dimension of
+programming complexity. High-level language approaches such as Julia further
+demonstrate that productivity and performance need not be mutually
+exclusive~\cite{Godoy2023}. Yet none of these approaches
+provides a principled answer to the question every developer faces in practice:
+for \emph{this workload}, on \emph{this architecture}, at \emph{this
+performance target}---should I use an abstraction or not?
 
-This paper makes the following contributions:
+What is missing is not another abstraction layer---it is the measurement
+infrastructure to evaluate existing ones. Abstraction selection today is
+heuristic, experience-driven, and opaque: developers rely on trial-and-error,
+folklore, and vendor documentation rather than evidence. No systematic,
+cross-layer empirical methodology exists for characterizing when abstraction
+helps, when it fails, and why---across workload types, hardware architectures,
+and backend maturity levels. This absence is not merely an inconvenience; it is
+a structural barrier to informed software engineering at exascale. As the
+community prepares for post-exascale systems with even greater architectural
+diversity, the cost of this gap will only increase. The stakes are concrete: in
+our measurements, Julia/\textsc{cuda.jl} delivers $1.25\times$ native DGEMM
+throughput via a memory layout advantage (P005), yet collapses to $0.35\times$
+efficiency on narrow BFS frontiers through per-launch dispatch amplification
+(P008)---the same framework producing opposite outcomes on adjacent workloads,
+depending solely on problem structure.
+
+This paper addresses this gap by presenting a \emph{measurement-driven
+framework for selective abstraction} in GPU-accelerated HPC software. The
+framework systematically characterizes abstraction effectiveness across a
+three-dimensional experimental matrix: seven representative workloads spanning
+regular (STREAM Triad, DGEMM, 3D Stencil), semi-irregular (SpMV, SpTRSV), and
+irregular (BFS, N-body) computational patterns; four abstraction layers (Kokkos,
+RAJA, SYCL, Julia) evaluated against native CUDA/HIP/SYCL baselines; and three
+GPU architectures covering NVIDIA Blackwell (RTX 5060), AMD CDNA2 (MI250X), and
+Intel Ponte Vecchio (GPU Max 1550). Using a four-level measurement hierarchy---performance
+portability coefficients~\cite{Pennycook2019}, overhead attribution, root cause
+analysis, and productivity metrics---we construct an empirical taxonomy of
+abstraction failure modes and success patterns, and derive a quantified decision
+framework that transforms abstraction selection from an art into an engineering
+discipline. This work does not propose a new programming model or runtime
+system; its contribution is the methodology and evidence base the community
+needs to make informed decisions about existing ones.
+
+Specifically, this paper answers three research questions:
+\begin{itemize}
+    \item[\textbf{RQ1}] \textit{When does abstraction help?} Under what workload
+    characteristics and architectural conditions do high-level programming
+    abstractions deliver on their portability promises without significant
+    performance penalties?
+
+    \item[\textbf{RQ2}] \textit{When does abstraction fail?} What are the
+    systematic patterns of abstraction breakdown, and which layers---compiler,
+    runtime, memory model---contribute to performance loss?
+
+    \item[\textbf{RQ3}] \textit{How can we quantify the trade-off?} Can
+    measurable, empirically-derived thresholds replace heuristic judgment in
+    abstraction selection, enabling a reproducible and transferable decision
+    framework?
+\end{itemize}
+
+Our main contributions are:
 
 \begin{enumerate}
-    \item An \textbf{empirical taxonomy} --- the first systematic classification of abstraction
-          failure modes and success patterns across architectures and workloads (Section~\ref{sec:taxonomy}).
-    \item A \textbf{measurement methodology} --- a reproducible protocol for cross-layer
-          performance attribution (Section~\ref{sec:methodology}).
-    \item A \textbf{quantified decision framework} --- evidence-based thresholds and rules
-          for abstraction selection (Section~\ref{sec:framework}).
-    \item A \textbf{performance portability dataset} --- TODO configurations across 5 abstractions
-          $\times$ 3 architectures $\times$ 7 workloads.
-    \item A \textbf{decision support tool} (\texttt{abstraction-advisor}) --- a command-line
-          advisor that ingests workload profiles and recommends abstraction strategies.
+    \item An \textbf{empirical taxonomy} --- the first systematic classification
+          of abstraction failure modes and success patterns across architectures
+          and workloads (Section~\ref{sec:taxonomy}).
+    \item A \textbf{measurement methodology} --- a reproducible protocol for
+          cross-layer performance attribution
+          (Section~\ref{sec:methodology}).
+    \item A \textbf{quantified decision framework} --- evidence-based thresholds
+          and rules for abstraction selection
+          (Section~\ref{sec:framework}).
+    \item A \textbf{performance portability dataset} --- 315 planned
+          configurations across 5 abstraction layers, 3 GPU architectures,
+          and 7 workloads, with full reproducibility artifacts.
+    \item A \textbf{decision support tool} (\texttt{abstraction-advisor}) --- a
+          command-line advisor that ingests workload profiles and recommends
+          abstraction strategies.
 \end{enumerate}
 
-% TODO: Add paper organization paragraph after structure is finalized.
+The remainder of this paper is organized as follows.
+Section~\ref{sec:background} provides background on performance portability
+metrics and the concept of selective abstraction.
+Section~\ref{sec:related} reviews related work across exascale programming
+practice, task-based runtimes, adaptive systems, and portability layers.
+Section~\ref{sec:methodology} presents the measurement methodology and
+experimental design.
+Sections~\ref{sec:results} and~\ref{sec:taxonomy} present experimental results
+and the resulting empirical taxonomy of failure and success patterns.
+Section~\ref{sec:framework} presents the quantified decision framework.
+Section~\ref{sec:validation} validates the framework against production
+exascale application codes.
+Section~\ref{sec:conclusion} concludes and outlines future directions.
