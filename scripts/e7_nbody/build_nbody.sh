@@ -86,6 +86,7 @@ echo "[build_nbody] ============================================================
 # ── Kokkos detection ──────────────────────────────────────────────────────────
 if [[ -z "${KOKKOS_INSTALL_PREFIX:-}" ]]; then
     for _p in \
+        "/home/obalola/projects/kokkos-hip-install" \
         "/home/obalola/projects/kokkos-cuda-install" \
         "${REPO_ROOT}/build/stream/kokkos_${PLATFORM}" \
         "/home/obalola/projects/kokkos/install" \
@@ -168,11 +169,42 @@ if [[ "${IS_AMD}" == "false" ]]; then
     echo "[build_nbody]   → ${BUILD_NATIVE}/nbody-native"
 fi
 
-# ── nbody-kokkos (NVIDIA only for now) ───────────────────────────────────────
+# ── nbody-kokkos ─────────────────────────────────────────────────────────────
 BUILD_KOKKOS="${BUILD_BASE}/kokkos_${PLATFORM}"
 if [[ "${IS_AMD}" == "true" ]]; then
-    echo "[build_nbody] SKIP nbody-kokkos (Kokkos HIP backend not yet wired for E7)"
-    _KOKKOS_OK=false
+    if [[ "${_KOKKOS_OK}" == "true" ]]; then
+        [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_KOKKOS}"
+        mkdir -p "${BUILD_KOKKOS}"
+
+        KOKKOS_LIB_DIR=""
+        for _ld in "lib" "lib64"; do
+            if [[ -f "${KOKKOS_INSTALL_PREFIX}/${_ld}/libkokkoscore.a" ]]; then
+                KOKKOS_LIB_DIR="${KOKKOS_INSTALL_PREFIX}/${_ld}"
+                break
+            fi
+        done
+
+        if [[ -z "${KOKKOS_LIB_DIR}" ]]; then
+            echo "[build_nbody] WARNING: libkokkoscore.a not found — SKIP nbody-kokkos"
+            _KOKKOS_OK=false
+        else
+            echo "[build_nbody] Building nbody-kokkos (Kokkos HIP, two-step -std=c++20) ..."
+            "${HIPCC_BIN}" -O3 --offload-arch="${HIP_ARCH_VAL}" -std=c++20 \
+                -DKOKKOS_ENABLE_HIP -DNBODY_USE_HIP \
+                -I "${KOKKOS_INSTALL_PREFIX}/include" -I "${SRC_DIR}" \
+                -c "${SRC_DIR}/nbody_kokkos.cpp" \
+                -o "${BUILD_KOKKOS}/nbody_kokkos.o"
+
+            "${HIPCC_BIN}" -O3 --offload-arch="${HIP_ARCH_VAL}" \
+                "${BUILD_KOKKOS}/nbody_kokkos.o" \
+                "${KOKKOS_LIB_DIR}/libkokkoscore.a" \
+                "${KOKKOS_LIB_DIR}/libkokkoscontainers.a" \
+                -o "${BUILD_KOKKOS}/nbody-kokkos"
+            echo "[build_nbody]   → ${BUILD_KOKKOS}/nbody-kokkos"
+        fi
+    else
+        echo "[build_nbody] SKIP nbody-kokkos (Kokkos not found)"
+    fi
 elif [[ "${_KOKKOS_OK}" == "true" ]]; then
     [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_KOKKOS}"
     mkdir -p "${BUILD_KOKKOS}"
@@ -203,11 +235,42 @@ else
     echo "[build_nbody] SKIP nbody-kokkos (Kokkos not found)"
 fi
 
-# ── nbody-raja (NVIDIA only for now) ─────────────────────────────────────────
+# ── nbody-raja ────────────────────────────────────────────────────────────────
 BUILD_RAJA="${BUILD_BASE}/raja_${PLATFORM}"
 if [[ "${IS_AMD}" == "true" ]]; then
-    echo "[build_nbody] SKIP nbody-raja (RAJA HIP backend not yet wired for E7)"
-    _RAJA_OK=false
+    if [[ "${_RAJA_OK}" == "true" ]]; then
+        [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_RAJA}"
+        mkdir -p "${BUILD_RAJA}"
+
+        RAJA_LIB_DIR=""
+        for _ld in "lib" "lib64"; do
+            if [[ -f "${RAJA_INSTALL_PREFIX}/${_ld}/libRAJA.a" ]]; then
+                RAJA_LIB_DIR="${RAJA_INSTALL_PREFIX}/${_ld}"
+                break
+            fi
+        done
+
+        if [[ -z "${RAJA_LIB_DIR}" ]]; then
+            echo "[build_nbody] WARNING: libRAJA.a not found — SKIP nbody-raja"
+            _RAJA_OK=false
+        else
+            echo "[build_nbody] Building nbody-raja (RAJA HIP, two-step) ..."
+            "${HIPCC_BIN}" -O3 --offload-arch="${HIP_ARCH_VAL}" \
+                -DNBODY_USE_HIP \
+                -I "${RAJA_INSTALL_PREFIX}/include" -I "${SRC_DIR}" \
+                -c "${SRC_DIR}/nbody_raja.cpp" \
+                -o "${BUILD_RAJA}/nbody_raja.o"
+
+            "${HIPCC_BIN}" -O3 --offload-arch="${HIP_ARCH_VAL}" \
+                "${BUILD_RAJA}/nbody_raja.o" \
+                "${RAJA_LIB_DIR}/libRAJA.a" \
+                "${RAJA_LIB_DIR}/libcamp.a" \
+                -o "${BUILD_RAJA}/nbody-raja"
+            echo "[build_nbody]   → ${BUILD_RAJA}/nbody-raja"
+        fi
+    else
+        echo "[build_nbody] SKIP nbody-raja (RAJA not found)"
+    fi
 elif [[ "${_RAJA_OK}" == "true" ]]; then
     [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_RAJA}"
     mkdir -p "${BUILD_RAJA}"
@@ -239,6 +302,41 @@ else
     echo "[build_nbody] SKIP nbody-raja (RAJA not found)"
 fi
 
+# ── nbody-sycl (AMD only) ─────────────────────────────────────────────────────
+BUILD_SYCL="${BUILD_BASE}/sycl_${PLATFORM}"
+_SYCL_OK=false
+if [[ "${IS_AMD}" == "true" ]]; then
+    # Detect acpp binary
+    ACPP_BIN=""
+    for _ab in \
+        "${ROCM_HOME:-/opt/rocm}/../acpp/bin/acpp" \
+        "/opt/acpp/bin/acpp" \
+        "/usr/local/bin/acpp" \
+        "$(command -v acpp 2>/dev/null || true)"; do
+        if [[ -n "${_ab}" ]] && command -v "${_ab}" &>/dev/null; then
+            ACPP_BIN="${_ab}"
+            break
+        fi
+    done
+
+    if [[ -z "${ACPP_BIN}" ]]; then
+        echo "[build_nbody] WARNING: acpp not found — SKIP nbody-sycl"
+    else
+        [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_SYCL}"
+        mkdir -p "${BUILD_SYCL}"
+        echo "[build_nbody] Building nbody-sycl (AdaptiveCpp, target hip:${HIP_ARCH_VAL}) ..."
+        "${ACPP_BIN}" --acpp-targets="hip:${HIP_ARCH_VAL}" -O3 \
+            -DNBODY_USE_HIP \
+            -I "${SRC_DIR}" \
+            "${SRC_DIR}/nbody_sycl.cpp" \
+            -o "${BUILD_SYCL}/nbody-sycl"
+        echo "[build_nbody]   → ${BUILD_SYCL}/nbody-sycl"
+        _SYCL_OK=true
+    fi
+else
+    echo "[build_nbody] SKIP nbody-sycl (NVIDIA — SYCL not built for this platform)"
+fi
+
 # ── nbody-julia wrapper ───────────────────────────────────────────────────────
 BUILD_JULIA="${BUILD_BASE}/julia_${PLATFORM}"
 [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_JULIA}"
@@ -246,11 +344,20 @@ mkdir -p "${BUILD_JULIA}"
 
 JULIA_SRC="${SRC_DIR}/nbody_julia.jl"
 JULIA_WRAP="${BUILD_JULIA}/nbody-julia"
+if [[ "${IS_AMD}" == "true" ]]; then
+cat > "${JULIA_WRAP}" <<EOF
+#!/usr/bin/env bash
+# Auto-generated wrapper — do not edit. Regenerate with build_nbody.sh.
+export JULIA_GPU_BACKEND="amdgpu"
+exec julia --project=@. "${JULIA_SRC}" "\$@"
+EOF
+else
 cat > "${JULIA_WRAP}" <<EOF
 #!/usr/bin/env bash
 # Auto-generated wrapper — do not edit. Regenerate with build_nbody.sh.
 exec julia --project=@. "${JULIA_SRC}" "\$@"
 EOF
+fi
 chmod +x "${JULIA_WRAP}"
 echo "[build_nbody]   → ${JULIA_WRAP} (Julia wrapper)"
 
@@ -261,4 +368,5 @@ echo "[build_nbody] Binaries:"
 [[ "${IS_AMD}" == "false" ]] && echo "[build_nbody]   native: ${BUILD_NATIVE}/nbody-native"
 [[ "${_KOKKOS_OK}" == "true" ]] && echo "[build_nbody]   kokkos: ${BUILD_KOKKOS}/nbody-kokkos"
 [[ "${_RAJA_OK}"   == "true" ]] && echo "[build_nbody]   raja:   ${BUILD_RAJA}/nbody-raja"
+[[ "${_SYCL_OK}"   == "true" ]] && echo "[build_nbody]   sycl:   ${BUILD_SYCL}/nbody-sycl"
 echo "[build_nbody]   julia:  ${JULIA_WRAP}"

@@ -31,9 +31,22 @@ PROC_DIR   = os.path.join(REPO_ROOT, "data", "processed")
 OUT_CSV    = os.path.join(PROC_DIR, "e7_nbody_summary.csv")
 os.makedirs(PROC_DIR, exist_ok=True)
 
-# Roofline constants (RTX 5060)
-PEAK_BW_GBS   = 272.0   # GB/s
 FLOPS_PER_PAIR = 20
+
+# Per-platform config: native abstraction label used as efficiency baseline
+PLATFORM_CONFIGS = {
+    # platform_prefix : native_abstraction_label
+    "nvidia": "native_notile",
+    "amd":    "hip",
+    "intel":  "native_notile",
+}
+
+
+def _native_key(platform: str) -> str:
+    for prefix, key in PLATFORM_CONFIGS.items():
+        if platform.startswith(prefix):
+            return key
+    return "native_notile"
 
 # Efficiency tiers (PPC-equivalent thresholds)
 TIER_EXCELLENT  = 0.95
@@ -114,12 +127,17 @@ def main():
 
     summary = pd.DataFrame(records)
 
-    # ── Efficiency relative to native_notile ──────────────────────────────────
-    baseline = (
-        summary[summary["abstraction"] == "native_notile"]
-        [["platform", "problem_size", "median_gflops"]]
-        .rename(columns={"median_gflops": "baseline_gflops"})
-    )
+    # ── Efficiency relative to platform native baseline ───────────────────────
+    # Build per-platform baseline (native_notile for NVIDIA, hip for AMD)
+    baseline_rows = []
+    for plat, grp in summary.groupby("platform"):
+        nat = _native_key(plat)
+        sub = grp[grp["abstraction"] == nat][["platform", "problem_size", "median_gflops"]]
+        baseline_rows.append(sub)
+    if baseline_rows:
+        baseline = pd.concat(baseline_rows).rename(columns={"median_gflops": "baseline_gflops"})
+    else:
+        baseline = pd.DataFrame(columns=["platform", "problem_size", "baseline_gflops"])
     summary = summary.merge(baseline, on=["platform", "problem_size"], how="left")
     summary["efficiency_vs_native_notile"] = (
         summary["median_gflops"] / summary["baseline_gflops"]

@@ -40,7 +40,7 @@ done
 # Default abstractions depend on platform (can be overridden by --abstractions)
 if [[ -z "${ABSTRACTIONS}" ]]; then
     if [[ "${PLATFORM}" == amd_* ]]; then
-        ABSTRACTIONS="hip julia"
+        ABSTRACTIONS="hip kokkos raja sycl julia"
     else
         ABSTRACTIONS="native_notile native_tile kokkos raja julia"
     fi
@@ -52,6 +52,11 @@ RAW_CSV="${RESULTS_DIR}/e7_nbody_${PLATFORM}_${DATE_STR}.csv"
 # CSV header
 echo "platform,abstraction,kernel,problem_size,n_atoms,run_id,n_nbrs_total,max_nbrs_per_atom,mean_nbrs_per_atom,actual_flops,time_ms,throughput_gflops,hw_state_verified" \
     > "${RAW_CSV}"
+
+# Set Julia GPU backend env var for AMD platforms
+if [[ "${PLATFORM}" == amd_* ]]; then
+    export JULIA_GPU_BACKEND="amdgpu"
+fi
 
 echo "[run_nbody] Platform: ${PLATFORM}"
 echo "[run_nbody] Output:   ${RAW_CSV}"
@@ -140,6 +145,10 @@ for ABS in ${ABSTRACTIONS}; do
                 ;;
             raja)
                 BIN="${BUILD_BASE}/raja_${PLATFORM}/nbody-raja"
+                KFLAG=""
+                ;;
+            sycl)
+                BIN="${BUILD_BASE}/sycl_${PLATFORM}/nbody-sycl"
                 KFLAG=""
                 ;;
             julia)
