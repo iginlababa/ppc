@@ -28,26 +28,32 @@ done
 VENDOR="${PLATFORM%%_*}"   # "nvidia" or "amd"
 
 # ── Kokkos / RAJA path detection ───────────────────────────────────────────────
-KOKKOS_ROOT=""
-for p in /usr/local/kokkos /opt/kokkos /usr/kokkos "${HOME}/kokkos" \
-          /usr/local /opt/local; do
-    [[ -f "${p}/lib/libkokkoscore.a" || -f "${p}/lib64/libkokkoscore.a" ]] && \
-        { KOKKOS_ROOT="${p}"; break; }
-done
+KOKKOS_ROOT="${KOKKOS_INSTALL_PREFIX:-}"
+if [[ -z "${KOKKOS_ROOT}" ]]; then
+    for p in /home/obalola/projects/kokkos-cuda-install \
+              /usr/local/kokkos /opt/kokkos /usr/kokkos "${HOME}/kokkos" \
+              /usr/local /opt/local; do
+        [[ -f "${p}/lib/libkokkoscore.a" || -f "${p}/lib64/libkokkoscore.a" ]] && \
+            { KOKKOS_ROOT="${p}"; break; }
+    done
+fi
 KOKKOS_FOUND=false
 [[ -n "${KOKKOS_ROOT}" ]] && KOKKOS_FOUND=true
 
-RAJA_ROOT=""
-for p in /usr/local/raja /opt/raja /usr/raja "${HOME}/raja" \
-          /usr/local /opt/local; do
-    [[ -f "${p}/lib/libRAJA.a" || -f "${p}/lib64/libRAJA.a" ]] && \
-        { RAJA_ROOT="${p}"; break; }
-done
+RAJA_ROOT="${RAJA_INSTALL_PREFIX:-}"
+if [[ -z "${RAJA_ROOT}" ]]; then
+    for p in /home/obalola/projects/raja/install \
+              /usr/local/raja /opt/raja /usr/raja "${HOME}/raja" \
+              /usr/local /opt/local; do
+        [[ -f "${p}/lib/libRAJA.a" || -f "${p}/lib64/libRAJA.a" ]] && \
+            { RAJA_ROOT="${p}"; break; }
+    done
+fi
 RAJA_FOUND=false
 [[ -n "${RAJA_ROOT}" ]] && RAJA_FOUND=true
 
 CAMP_LIB=""
-for p in /usr/local/camp /opt/camp "${HOME}/camp" /usr/local /opt/local; do
+for p in "${RAJA_ROOT}" /usr/local/camp /opt/camp "${HOME}/camp" /usr/local /opt/local; do
     [[ -f "${p}/lib/libcamp.a" || -f "${p}/lib64/libcamp.a" ]] && \
         { CAMP_LIB="${p}"; break; }
 done
@@ -265,6 +271,8 @@ if [[ "${RAJA_FOUND}" == "true" ]]; then
     [[ -n "${CAMP_LIB}" ]] && CAMP_LIBS="-L${CAMP_LIB}/lib -lcamp"
 
     nvcc ${NVCC_FLAGS} -x cu \
+        --expt-extended-lambda --expt-relaxed-constexpr \
+        -allow-unsupported-compiler \
         -I"${RAJA_INC}" \
         -c "${KERNEL_DIR}/kernel_bfs_raja.cpp" \
         -o "${BIN_DIR}/kernel_bfs_raja.o"
@@ -272,7 +280,7 @@ if [[ "${RAJA_FOUND}" == "true" ]]; then
     g++ ${HOST_FLAGS} \
         "${BIN_DIR}/kernel_bfs_raja.o" \
         -o "${BIN_DIR}/bfs-raja" \
-        ${RAJA_LIBS} ${CAMP_LIBS} ${CUDA_LIBS} -lstdc++
+        ${RAJA_LIBS} ${CAMP_LIBS} ${CUDA_LIBS} -ldl -lpthread -lstdc++
     echo "[build_bfs] RAJA: OK → ${BIN_DIR}/bfs-raja"
     [[ "${VERIFY}" == "true" ]] && run_verify "${BIN_DIR}/bfs-raja" "raja"
 else

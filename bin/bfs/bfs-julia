@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+exec julia --project="${REPO_ROOT}" \
+    "${REPO_ROOT}/kernels/bfs/kernel_bfs_julia.jl" "$@"
