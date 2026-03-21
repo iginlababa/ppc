@@ -10,7 +10,7 @@ Also computes cross-platform PPC scores (Pennycook et al. harmonic-mean
 efficiency) saved to data/processed/e3_ppc_scores.csv.
 
 E3 DESIGN DECISIONS
-[D1] Problem sizes: small=32³, medium=128³, large=256³.
+[D1] Problem sizes: small=32³, medium=128³, large=256³, xlarge=512³.
 [D3] Primary metric: GB/s (memory-bound kernel, AI≈0.2 FLOP/byte).
 [D7] Amended warmup: adaptive CV<2% — no fixed WARMUP_DROP needed since the
      kernel itself discards the warmup phase before emitting run_id rows.
@@ -54,6 +54,7 @@ PROBLEM_SIZES = {
     "small":  32,
     "medium": 128,
     "large":  256,
+    "xlarge": 512,  # exceeds L2 → DRAM-bound; primary roofline measurement
 }
 
 
@@ -138,7 +139,7 @@ def compute_stats(df: pd.DataFrame) -> pd.DataFrame:
         })
 
     platform_order = list(PLATFORM_CONFIGS.keys())
-    size_order = {"small": 0, "medium": 1, "large": 2}
+    size_order = {"small": 0, "medium": 1, "large": 2, "xlarge": 3}
     result = pd.DataFrame(rows)
     result["_ord_plat"] = result["platform"].apply(
         lambda p: platform_order.index(p) if p in platform_order else 999)
@@ -233,7 +234,7 @@ def compute_ppc_scores(stats: pd.DataFrame) -> pd.DataFrame:
         })
 
     df = pd.DataFrame(rows)
-    size_order = {"small": 0, "medium": 1, "large": 2}
+    size_order = {"small": 0, "medium": 1, "large": 2, "xlarge": 3}
     df["_ord"] = df["problem_size"].map(size_order)
     df = df.sort_values(["abstraction", "_ord"]).drop(columns="_ord").reset_index(drop=True)
     return df
@@ -260,7 +261,7 @@ def print_report(stats: pd.DataFrame):
         print(f"\n{'='*84}")
         print(f"  Platform: {platform}")
         print(f"{'='*84}")
-        for size_label in ["small", "medium", "large"]:
+        for size_label in ["small", "medium", "large", "xlarge"]:
             sub = psub[psub["problem_size"] == size_label]
             if sub.empty:
                 continue

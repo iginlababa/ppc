@@ -1,16 +1,17 @@
 // kernel_stencil_raja.cpp — E3 3D Stencil: RAJA::kernel 3D loop nest.
 //
 // ── E3 DESIGN DECISIONS ───────────────────────────────────────────────────────
-// [D4-RAJA] RAJA::kernel with explicit 3D CUDA mapping:
-//   - Dim 0 (iz) → cuda_block_z_loop
-//   - Dim 1 (iy) → cuda_block_y_loop
-//   - Dim 2 (ix) → cuda_thread_x_loop (256 threads)
+// [D4-RAJA] RAJA::kernel with explicit 3D GPU mapping:
+//   - Dim 0 (iz) → block_z_loop
+//   - Dim 1 (iy) → block_y_loop
+//   - Dim 2 (ix) → thread_x loop  (see wave64 note below)
 //   ix is the innermost/fastest-varying index in row-major memory → coalesced.
-//   This is the idiomatic RAJA::kernel for 3D structured-grid kernels with
-//   a natural grid-to-block mapping, unlike the E2 raja_naive forall which
-//   had no shmem and was labeled for its API limitation.
-//   For E3 (memory-bound), there is no API limitation — RAJA exposes the full
-//   3D parallelism efficiently. Label: "raja" (not "raja_naive").
+//   NVIDIA: HipKernelFixed<1024> + hip_thread_x_loop (blockDim.x auto-sized to 1024).
+//           For ix range ~254, threads 254..1023 are idle — acceptable on CUDA warp-32.
+//   AMD:    HipKernelFixed<64>   + hip_thread_size_x_loop<64> forces blockDim.x=64=1
+//           wavefront. Without this, blockDim.x=1024 → 770/1024 idle threads = ~75%
+//           wavefront waste → 35–45% efficiency. With 64, all threads in each
+//           wavefront are active → near-native bandwidth.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include <RAJA/RAJA.hpp>
@@ -29,11 +30,14 @@
 // Thread mapping: For<2,ix> → thread_x (innermost, coalesced);
 //                 For<1,iy> → block_y; For<0,iz> → block_z.
 #ifdef __HIP_PLATFORM_AMD__
+// HipKernelFixed<64>: blockDim.x=64 = 1 wavefront.
+// hip_thread_size_x_loop<64>: each thread handles ix with stride 64 across the range.
+// All 64 threads in a wavefront access consecutive ix → coalesced; no idle lanes.
 using StencilPolicy3D = RAJA::KernelPolicy<
-    RAJA::statement::HipKernel<
+    RAJA::statement::HipKernelFixed<64,
         RAJA::statement::For<0, RAJA::hip_block_z_loop,
             RAJA::statement::For<1, RAJA::hip_block_y_loop,
-                RAJA::statement::For<2, RAJA::hip_thread_x_loop,
+                RAJA::statement::For<2, RAJA::hip_thread_size_x_loop<64>,
                     RAJA::statement::Lambda<0>>>>>>;
 using SyncPolicy = RAJA::hip_synchronize;
 #else

@@ -4,8 +4,12 @@
 # E3 DESIGN DECISIONS
 # [D4-Julia] @cuda/@roc kernel with 3D grid. Column-major GPU arrays.
 #   For GPUArray{Float64,3} with dimensions (NX, NY, NZ), the first index (ix)
-#   varies fastest in memory. threadIdx().x (CUDA) / workitemIdx().x (AMDGPU)
-#   maps to ix → 32 consecutive threads access consecutive memory → coalesced.
+#   varies fastest in memory. threadIdx().x / workitemIdx().x maps to ix.
+#   CUDA  (warp-32):  (bx,by,bz)=(32,4,2)=256 threads; bx=32=1 warp.
+#   AMDGPU (wave-64): (bx,by,bz)=(64,8,1)=512 threads; bx=64=1 wavefront.
+#   With bx=32 on AMD, one wavefront spans two iy rows — non-contiguous ix accesses
+#   from two different rows halve coalescing efficiency. bx=64 keeps all wavefront
+#   threads on consecutive ix within one row → fully coalesced.
 # [D7-Julia] Adaptive warmup: tracks CV over last 10 timings, stops when CV < 2%.
 # [D3] c0=0.5, c1=(1-c0)/6. FP64 throughout.
 #
@@ -131,7 +135,7 @@ function verify_stencil(N::Int, c0::Float64, c1::Float64)::Bool
     inp_d = to_gpu(hIn)
     out_d = gpu_zeros(Float64, N, N, N)
     N32   = Int32(N)
-    bx, by, bz = 32, 4, 2
+    bx, by, bz = (BACKEND == "amdgpu") ? (64, 8, 1) : (32, 4, 2)  # wave64 vs warp32
     gx = cld(N, bx); gy = cld(N, by); gz = cld(N, bz)
     _gpu_launch!(out_d, inp_d, N32, c0, c1, (bx,by,bz), (gx,gy,gz))
     gpu_sync()
@@ -156,7 +160,7 @@ function run_stencil(N::Int, warmup_max::Int, reps::Int, platform::String)
 
     c0 = 0.5; c1 = (1.0 - c0) / 6.0
     N32 = Int32(N)
-    bx, by, bz = 32, 4, 2
+    bx, by, bz = (BACKEND == "amdgpu") ? (64, 8, 1) : (32, 4, 2)  # wave64 vs warp32
     gx = cld(N, bx); gy = cld(N, by); gz = cld(N, bz)
 
     inp_d = gpu_rand(Float64, N, N, N)

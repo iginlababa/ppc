@@ -38,6 +38,13 @@ PPC_EXCELLENT        = 0.80
 PPC_ACCEPTABLE       = 0.60
 DEEP_PROFILE_TRIGGER = 0.85   # flag if abstraction efficiency < 0.85 * native
 
+# ── API-Limitation abstractions (P004) ────────────────────────────────────────
+# These are intentionally naive/untiled implementations.  Their low efficiency
+# IS the taxonomy finding (P004 API Limitation) — not a defect to diagnose with
+# nsys/ncu.  Excluding them from the profiling queue avoids spurious entries.
+# See e2_profiling_notes.md §8 and kernel [D6] comments for rationale.
+API_LIMITATION_ABSTRACTIONS: frozenset[str] = frozenset({"raja_naive", "julia_naive"})
+
 # ── Experiment → kernel name mapping ──────────────────────────────────────────
 # Populated from benchmarks/*/config.yaml at load time when available;
 # hard-coded fallback ensures the script works without PyYAML installed.
@@ -212,9 +219,16 @@ def _ppc_tier(ppc: float) -> str:
 
 
 def flag_for_profiling(eff: pd.DataFrame) -> pd.DataFrame:
-    """Return rows where abstraction efficiency < DEEP_PROFILE_TRIGGER."""
+    """Return rows where abstraction efficiency < DEEP_PROFILE_TRIGGER.
+
+    API_LIMITATION_ABSTRACTIONS (raja_naive, julia_naive) are excluded: their
+    low efficiency is the P004 API Limitation finding by design and profiling
+    them with nsys/ncu reveals nothing beyond what the kernel comments already
+    document.  See e2_profiling_notes.md §8.
+    """
     flagged = eff[
         (eff["abstraction"] != "native")
+        & (~eff["abstraction"].isin(API_LIMITATION_ABSTRACTIONS))
         & (eff["efficiency"] < DEEP_PROFILE_TRIGGER)
     ].copy()
     flagged["profiling_reason"] = (

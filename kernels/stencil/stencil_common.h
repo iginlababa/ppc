@@ -4,11 +4,11 @@
 // Julia and Numba carry equivalent definitions in-file.
 //
 // ── E3 DESIGN DECISIONS ───────────────────────────────────────────────────────
-// [D1] Problem sizes: small=32, medium=128, large=256 (all sides equal, N³ grid).
-//      Memory per array: small=256KB, medium=16MB, large=128MB (FP64).
-//      Two arrays (in, out) → peak: 256 MB for large. Well within 8GB VRAM.
-//      Note: project_spec §8.3 said 64³/256³/512³ — overridden here to 32³/128³/256³
-//      to keep small=32 for quick correctness iteration and match the task spec.
+// [D1] Problem sizes: small=32, medium=128, large=256, xlarge=512 (all sides equal, N³ grid).
+//      Memory per array: small=256KB, medium=16MB, large=128MB, xlarge=1GB (FP64).
+//      Two arrays (in, out) → peak: 256 MB for large, 2 GB for xlarge. Well within MI300X 192 GB HBM.
+//      large=256³ fits in MI300X L2 cache (~256 MB) → cache-bound, not DRAM-bound.
+//      xlarge=512³ exceeds all GPU caches → valid DRAM-bandwidth measurement (~5 TB/s expected).
 // [D2] 7-point Jacobi stencil. c0=0.5, c1=(1-c0)/6 ≈ 0.08333.
 //      Sums satisfy conservation: c0 + 6*c1 = 1.0 (weighted average property).
 // [D3] FP64 throughout. AI = 13 FLOP / 64 bytes ≈ 0.203 FLOP/byte (memory-bound).
@@ -41,6 +41,7 @@
 static constexpr int STENCIL_N_SMALL  = 32;
 static constexpr int STENCIL_N_MEDIUM = 128;
 static constexpr int STENCIL_N_LARGE  = 256;
+static constexpr int STENCIL_N_XLARGE = 512;  // exceeds L2 → DRAM-bound on all platforms
 
 // ── Stencil coefficients (D2) ─────────────────────────────────────────────────
 static constexpr double STENCIL_C0 = 0.5;
@@ -90,7 +91,8 @@ inline double stencil_gflops(int N, double time_s) {
 inline const char* stencil_size_label(int N) {
     if (N <= STENCIL_N_SMALL)  return "small";
     if (N <= STENCIL_N_MEDIUM) return "medium";
-    return "large";
+    if (N <= STENCIL_N_LARGE)  return "large";
+    return "xlarge";
 }
 
 // ── Adaptive warmup (D7) ──────────────────────────────────────────────────────
