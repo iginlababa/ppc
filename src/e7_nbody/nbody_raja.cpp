@@ -1,19 +1,27 @@
 // nbody_raja.cpp — E7 N-Body, RAJA abstraction.
 //
 // Compile: two-step via CMakeLists.txt / build_nbody.sh
-//   nvcc -x cu -dc -arch=sm_120 -allow-unsupported-compiler
-//        -I$RAJA_INC nbody_raja.cpp -o nbody_raja.o
-//   nvcc -arch=sm_120 nbody_raja.o -L$RAJA_LIB -lRAJA -lcamp -lcuda -o nbody_raja
+//   NVIDIA: nvcc -x cu -dc -arch=sm_120 -allow-unsupported-compiler
+//           -I$RAJA_INC nbody_raja.cpp -o nbody_raja.o
+//           nvcc -arch=sm_120 nbody_raja.o -L$RAJA_LIB -lRAJA -lcamp -lcuda -o nbody_raja
+//   AMD:    hipcc -O3 --offload-arch=gfx942 -DNBODY_USE_HIP
+//           -I$RAJA_INC nbody_raja.cpp -o nbody_raja.o
+//           hipcc nbody_raja.o -L$RAJA_LIB -lRAJA -lcamp -o nbody_raja
 //
-// Uses raw device pointers (float* flat layout) and RAJA::forall<cuda_exec<256>>.
+// Uses raw device pointers (float* flat layout) and RAJA::forall<ExecPolicy>.
 // Note: harmless warning in RAJA/policy/cuda/policy.hpp:1936 with sm_120 (known).
 
 #include "nbody_common.h"
+#include "gpu_compat.h"
 #include <RAJA/RAJA.hpp>
-#include <cuda_runtime.h>
-#include <vector>
 
+#ifdef NBODY_USE_HIP
+using NbodyExecPolicy = RAJA::hip_exec<NBODY_BLOCK_SIZE>;
+using NbodySyncPolicy = RAJA::hip_synchronize;
+#else
 using NbodyExecPolicy = RAJA::cuda_exec<NBODY_BLOCK_SIZE>;
+using NbodySyncPolicy = RAJA::cuda_synchronize;
+#endif
 
 int main(int argc, char** argv) {
     NbodyConfig cfg = nbody_parse_args(argc, argv);
@@ -41,19 +49,19 @@ int main(int argc, char** argv) {
     // GPU allocations (raw device pointers)
     float *d_pos4, *d_force3;
     int   *d_ptr, *d_idx;
-    CUDA_CHECK(cudaMalloc(&d_pos4,   N * 4 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_force3, N * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_ptr,    (N + 1) * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_idx,    csr.total * sizeof(int)));
+    GPU_CHECK(gpuMalloc(&d_pos4,   N * 4 * sizeof(float)));
+    GPU_CHECK(gpuMalloc(&d_force3, N * 3 * sizeof(float)));
+    GPU_CHECK(gpuMalloc(&d_ptr,    (N + 1) * sizeof(int)));
+    GPU_CHECK(gpuMalloc(&d_idx,    csr.total * sizeof(int)));
 
-    CUDA_CHECK(cudaMemcpy(d_pos4, h_pos4.data(),       N * 4 * sizeof(float),   cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_ptr,  csr.ptr.data(),      (N + 1) * sizeof(int),   cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_idx,  csr.idx.data(),      csr.total * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemset(d_force3, 0, N * 3 * sizeof(float)));
+    GPU_CHECK(gpuMemcpy(d_pos4, h_pos4.data(),  N * 4 * sizeof(float),   gpuMemcpyHostToDevice));
+    GPU_CHECK(gpuMemcpy(d_ptr,  csr.ptr.data(), (N + 1) * sizeof(int),   gpuMemcpyHostToDevice));
+    GPU_CHECK(gpuMemcpy(d_idx,  csr.idx.data(), csr.total * sizeof(int), gpuMemcpyHostToDevice));
+    GPU_CHECK(gpuMemset(d_force3, 0, N * 3 * sizeof(float)));
 
     // Report VRAM
     size_t free_mem = 0, total_mem = 0;
-    CUDA_CHECK(cudaMemGetInfo(&free_mem, &total_mem));
+    GPU_CHECK(gpuMemGetInfo(&free_mem, &total_mem));
     std::printf("NBODY_VRAM used_mb=%.1f\n",
                 (total_mem - free_mem) / (1024.0 * 1024.0));
 
@@ -89,25 +97,25 @@ int main(int argc, char** argv) {
                 d_force3[i*3+1] = fy;
                 d_force3[i*3+2] = fz;
             });
-        RAJA::synchronize<RAJA::cuda_synchronize>();
+        RAJA::synchronize<NbodySyncPolicy>();
     };
 
     // ── Warmup ─────────────────────────────────────────────────────────────────
     for (int w = 0; w < NBODY_WARMUP; ++w) run_kernel();
 
     // ── Timed runs ─────────────────────────────────────────────────────────────
-    cudaEvent_t ev_start, ev_stop;
-    CUDA_CHECK(cudaEventCreate(&ev_start));
-    CUDA_CHECK(cudaEventCreate(&ev_stop));
+    gpuEvent_t ev_start, ev_stop;
+    GPU_CHECK(gpuEventCreate(&ev_start));
+    GPU_CHECK(gpuEventCreate(&ev_stop));
 
     std::vector<double> times_ms(cfg.reps);
     for (int rep = 0; rep < cfg.reps; ++rep) {
-        CUDA_CHECK(cudaEventRecord(ev_start));
+        GPU_CHECK(gpuEventRecord(ev_start));
         run_kernel();
-        CUDA_CHECK(cudaEventRecord(ev_stop));
-        CUDA_CHECK(cudaEventSynchronize(ev_stop));
+        GPU_CHECK(gpuEventRecord(ev_stop));
+        GPU_CHECK(gpuEventSynchronize(ev_stop));
         float ms = 0.0f;
-        CUDA_CHECK(cudaEventElapsedTime(&ms, ev_start, ev_stop));
+        GPU_CHECK(gpuEventElapsedTime(&ms, ev_start, ev_stop));
         times_ms[rep] = (double)ms;
         NBODY_PRINT_RUN(rep + 1, cfg, csr, times_ms[rep]);
     }
@@ -118,7 +126,7 @@ int main(int argc, char** argv) {
     // ── Verification ───────────────────────────────────────────────────────────
     if (cfg.verify) {
         std::vector<float> gpu_f3(N * 3);
-        CUDA_CHECK(cudaMemcpy(gpu_f3.data(), d_force3, N * 3 * sizeof(float), cudaMemcpyDeviceToHost));
+        GPU_CHECK(gpuMemcpy(gpu_f3.data(), d_force3, N * 3 * sizeof(float), gpuMemcpyDeviceToHost));
         std::vector<float4> gpu_f4(N);
         for (int i = 0; i < N; ++i)
             gpu_f4[i] = {gpu_f3[i*3+0], gpu_f3[i*3+1], gpu_f3[i*3+2], 0.0f};
@@ -128,11 +136,11 @@ int main(int argc, char** argv) {
                     max_rel, (max_rel < 1e-3f) ? "PASS" : "FAIL");
     }
 
-    CUDA_CHECK(cudaFree(d_pos4));
-    CUDA_CHECK(cudaFree(d_force3));
-    CUDA_CHECK(cudaFree(d_ptr));
-    CUDA_CHECK(cudaFree(d_idx));
-    CUDA_CHECK(cudaEventDestroy(ev_start));
-    CUDA_CHECK(cudaEventDestroy(ev_stop));
+    GPU_CHECK(gpuFree(d_pos4));
+    GPU_CHECK(gpuFree(d_force3));
+    GPU_CHECK(gpuFree(d_ptr));
+    GPU_CHECK(gpuFree(d_idx));
+    GPU_CHECK(gpuEventDestroy(ev_start));
+    GPU_CHECK(gpuEventDestroy(ev_stop));
     return 0;
 }

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-plot_e7_roofline.py — E7 N-Body roofline figure.
+plot_e7_roofline.py — E7 N-Body two-panel roofline figure.
 
-fig15_e7_roofline.png — roofline model: GFLOP/s vs arithmetic intensity (FLOP/byte)
-  Plots measured (AI, GFLOP/s) for each (abstraction, problem_size) configuration.
-  Overlays the roofline ridge for nvidia_rtx5060.
+fig15_e7_roofline.png — two-panel: left = NVIDIA RTX 5060, right = AMD MI300X
+  Plots measured (AI, GFLOP/s) for each (abstraction, problem_size) per platform.
   AI computed from CSR neighbor statistics:
     FLOPs = n_nbrs_total × 20
     Bytes = n_nbrs_total × 16 + n_atoms × 16 + n_atoms × 12
@@ -29,16 +28,29 @@ os.makedirs(FIG_DIR, exist_ok=True)
 
 SUMMARY_CSV = os.path.join(DATA_PROC, "e7_nbody_summary.csv")
 
-# ── RTX 5060 roofline parameters ───────────────────────────────────────
-PEAK_GFLOPS   = 10_000.0   # 10 TFLOP/s sustained FP32
-PEAK_BW_GBS   = 272.0      # 272 GB/s GDDR7
-RIDGE_AI      = PEAK_GFLOPS / PEAK_BW_GBS   # ≈ 36.8 FLOP/byte
+# ── Per-platform roofline parameters ───────────────────────────────────────────
+PLATFORMS = {
+    "nvidia_rtx5060": {
+        "label":      "NVIDIA RTX 5060",
+        "peak_gflops": 10_000.0,   # 10 TFLOP/s sustained FP32
+        "peak_bw":     272.0,      # 272 GB/s GDDR7
+        "native_abs":  "native_notile",
+    },
+    "amd_mi300x": {
+        "label":      "AMD MI300X",
+        "peak_gflops": 181_000.0,  # ~181 TFLOP/s FP32
+        "peak_bw":     4_010.0,    # 4010 GB/s HBM3
+        "native_abs":  "hip",
+    },
+}
 
 COLORS = {
     "native_notile": "#2b4590",
     "native_tile":   "#e87722",
+    "hip":           "#2b4590",   # same blue — native equivalent for AMD
     "kokkos":        "#2ca02c",
     "raja":          "#9467bd",
+    "sycl":          "#ff7f0e",
     "julia":         "#d62728",
 }
 MARKERS = {
@@ -49,46 +61,72 @@ MARKERS = {
 SIZE_LABELS = {"small": "S(4K)", "medium": "M(32K)", "large": "L(256K)"}
 
 
-def fig15_roofline(df: pd.DataFrame):
-    ai_range = np.logspace(-2, 3, 500)
-    roof = np.minimum(ai_range * PEAK_BW_GBS, PEAK_GFLOPS)
+def _plot_panel(ax, df_plat: pd.DataFrame, cfg: dict):
+    peak_gflops = cfg["peak_gflops"]
+    peak_bw     = cfg["peak_bw"]
+    ridge_ai    = peak_gflops / peak_bw
 
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.loglog(ai_range, roof, "k-", linewidth=1.8, label="Roofline (RTX 5060L)")
-    ax.axvline(RIDGE_AI, color="gray", linewidth=0.8, linestyle="--",
-               label=f"Ridge = {RIDGE_AI:.1f} FLOP/byte")
+    ai_range = np.logspace(-2, 4, 500)
+    roof = np.minimum(ai_range * peak_bw, peak_gflops)
 
-    ax.text(RIDGE_AI * 0.3, PEAK_GFLOPS * 0.08,
-            "memory-bound", fontsize=8, color="gray", ha="center")
-    ax.text(RIDGE_AI * 3.5, PEAK_GFLOPS * 0.5,
-            "compute-bound", fontsize=8, color="gray", ha="center")
+    ax.loglog(ai_range, roof, "k-", linewidth=1.8)
+    ax.axvline(ridge_ai, color="gray", linewidth=0.8, linestyle="--")
+    ax.text(ridge_ai * 0.3, peak_gflops * 0.05,
+            "memory-bound", fontsize=7, color="gray", ha="center")
+    ax.text(ridge_ai * 3.5, peak_gflops * 0.4,
+            "compute-bound", fontsize=7, color="gray", ha="center")
 
-    legend_handles = []
-
-    for _, row in df.iterrows():
+    for _, row in df_plat.iterrows():
         abs_ = str(row["abstraction"])
         sz   = str(row["problem_size"])
         if abs_ not in COLORS or sz not in MARKERS:
             continue
-
         ai     = float(row["ai_flop_byte"]) if not np.isnan(row["ai_flop_byte"]) else np.nan
         gflops = float(row["median_gflops"])
-        if np.isnan(ai) or ai <= 0:
+        if np.isnan(ai) or ai <= 0 or gflops <= 0:
             continue
-
-        color  = COLORS[abs_]
-        marker = MARKERS[sz]
-        ax.scatter(ai, gflops, c=color, marker=marker,
+        ax.scatter(ai, gflops, c=COLORS[abs_], marker=MARKERS[sz],
                    s=80, zorder=5, edgecolors="white", linewidths=0.5)
-        ax.annotate(
-            SIZE_LABELS[sz],
-            (ai, gflops), xytext=(5, 4), textcoords="offset points",
-            fontsize=7, color=color
-        )
+        ax.annotate(SIZE_LABELS[sz], (ai, gflops),
+                    xytext=(5, 4), textcoords="offset points",
+                    fontsize=6.5, color=COLORS[abs_])
 
-    # Legend
+    ridge_label = f"Ridge={ridge_ai:.0f}" if ridge_ai >= 10 else f"Ridge={ridge_ai:.1f}"
+    ax.set_title(
+        f"{cfg['label']}\n"
+        f"Peak {peak_gflops/1000:.0f} TFLOP/s  |  BW {peak_bw:.0f} GB/s  |  {ridge_label} FLOP/byte",
+        fontsize=9, fontweight="bold"
+    )
+    ax.set_xlabel("Arithmetic Intensity (FLOP/byte)", fontsize=9)
+    ax.grid(which="both", linestyle=":", alpha=0.4)
+    ax.set_xlim(0.05, 200)
+    ax.set_ylim(1, peak_gflops * 2)
+
+
+def fig15_roofline(df: pd.DataFrame):
+    # Determine which platforms are present in data
+    present = [p for p in PLATFORMS if p in df["platform"].unique()]
+    if not present:
+        print("[plot_e7_roofline] WARNING: no known platforms found in summary CSV")
+        return
+
+    ncols = len(present)
+    fig, axes = plt.subplots(1, ncols, figsize=(9 * ncols, 6), squeeze=False)
+
+    for col, plat in enumerate(present):
+        ax = axes[0][col]
+        df_p = df[df["platform"] == plat]
+        _plot_panel(ax, df_p, PLATFORMS[plat])
+        if col == 0:
+            ax.set_ylabel("GFLOP/s (median)", fontsize=9)
+
+    # Shared legend on right panel
+    legend_handles = []
+    # Collect abstraction colors present in data
     for abs_, color in COLORS.items():
-        legend_handles.append(mpatches.Patch(color=color, label=abs_))
+        if abs_ in df["abstraction"].unique():
+            lbl = "native (hip)" if abs_ == "hip" else abs_
+            legend_handles.append(mpatches.Patch(color=color, label=lbl))
     for sz, marker in MARKERS.items():
         legend_handles.append(
             plt.Line2D([0], [0], marker=marker, color="gray",
@@ -97,24 +135,14 @@ def fig15_roofline(df: pd.DataFrame):
     legend_handles.append(
         plt.Line2D([0], [0], color="black", linewidth=1.8, label="Roofline")
     )
-    legend_handles.append(
-        plt.Line2D([0], [0], color="gray", linestyle="--",
-                   label=f"Ridge ({RIDGE_AI:.1f})")
-    )
+    axes[0][-1].legend(handles=legend_handles, fontsize=7.5, ncol=1,
+                       loc="lower right", framealpha=0.9)
 
-    ax.set_xlabel("Arithmetic Intensity (FLOP/byte)", fontsize=11)
-    ax.set_ylabel("GFLOP/s (median)", fontsize=11)
-    ax.set_title(
-        "E7 N-Body — Roofline (RTX 5060)\n"
-        "CSR AI = n_nbrs×20 / (n_nbrs×16 + N×16 + N×12) ≈ 0.975 FLOP/byte\n"
-        "All kernels are memory-bound (AI << ridge ≈ 36.8 FLOP/byte)",
-        fontsize=10, fontweight="bold"
+    fig.suptitle(
+        "E7 N-Body — Roofline  (CSR AI ≈ 0.975 FLOP/byte, memory-bound on all platforms)",
+        fontsize=11, fontweight="bold", y=1.01
     )
-    ax.legend(handles=legend_handles, fontsize=7.5, ncol=3,
-              loc="lower right", framealpha=0.9)
-    ax.grid(which="both", linestyle=":", alpha=0.4)
-    ax.set_xlim(0.05, 200)
-    ax.set_ylim(1, PEAK_GFLOPS * 2)
+    fig.tight_layout()
 
     out = os.path.join(FIG_DIR, "fig15_e7_roofline.png")
     fig.savefig(out, dpi=150, bbox_inches="tight")
@@ -131,7 +159,7 @@ def main():
     df = pd.read_csv(SUMMARY_CSV)
     print(f"[plot_e7_roofline] Loaded {len(df)} rows")
 
-    print("[plot_e7_roofline] Generating fig15 (roofline) ...")
+    print("[plot_e7_roofline] Generating fig15 (two-panel roofline) ...")
     fig15_roofline(df)
 
     print(f"[plot_e7_roofline] Figures saved to {FIG_DIR}/")

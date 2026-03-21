@@ -35,14 +35,23 @@ abstractions:
   - julia        # partial — complex control flow challenges JIT
 
 platforms:
-  - nvidia_a100
-  - amd_mi250x
-  - intel_pvc
+  - nvidia_rtx5060
+  - amd_mi300x
+
+platform_abstractions:
+  nvidia_rtx5060: [native_notile, native_tile, kokkos, raja, julia]
+  amd_mi300x:     [hip, kokkos, raja, sycl, julia]
+
+platform_notes:
+  amd_mi300x:
+    sycl: "AdaptiveCpp acpp --acpp-targets=hip:gfx942; predicted EXCELLENT (~95%+) — single kernel per rep, no HSA dispatch amplification (contrast with E5/E6 where SYCL was poor due to n_levels × q.wait() overhead)"
+    hip: "Native HIP — efficiency baseline for AMD"
 
 notes:
   - "Production workload — bridges to real application validation"
   - "Tests dynamic data structure handling (neighbor lists)"
   - "Irregular neighbor lists, complex control flow, high AI but irregular memory"
+  - "SYCL taxonomy reversal: EXCELLENT on E7 (1 launch/rep) vs POOR on E5/E6 (n_levels launches/rep)"
 
 correctness:
   tolerance: 1.0e-4   # Relaxed — floating-point order sensitivity in reductions
