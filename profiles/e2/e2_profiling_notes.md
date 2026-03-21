@@ -132,6 +132,39 @@ At arithmetic intensity ≈ 683 FLOP/byte (compute-bound), synchronisation overh
 
 ---
 
+## 8. AMD MI300X — raja_naive and julia_naive (by design, no profiling needed)
+
+**Date:** 2026-03-21
+**Entries removed from profiling_queue.csv:**
+- `dgemm_raja_naive amd_mi300x large eff=0.189`
+- `dgemm_julia_naive amd_mi300x large eff=0.306`
+
+### Why these entries do not require nsys/ncu profiling
+
+Both abstractions are intentionally naive/untiled implementations. Their low efficiency relative to the native HIP baseline is the P004 API Limitation finding itself — not a defect to be diagnosed.
+
+**raja_naive (eff=0.189):**
+The kernel is an untiled O(N³) DGEMM (`RAJA::forall` flat 1D launch, one thread per output element, inner loop over global memory). This is documented in `kernel_dgemm_raja.cpp` [D6]: RAJA's `forall`/`kernel` API has no portable primitive for `__shared__` memory tiling on GPU; implementing tiled DGEMM inside a RAJA lambda would require raw HIP intrinsics, defeating the abstraction goal. At N=8192, the untiled kernel achieves 1,364 GFLOP/s vs native 7,214 GFLOP/s (eff=0.189). This gap is the expected consequence of O(N²) global-memory traffic per element vs O(N/tile) in a tiled kernel. No profiler output is needed to confirm this — it follows from the algorithm.
+
+Note on the native baseline: `abstraction=native` on AMD is a hand-written tiled HIP DGEMM (not rocBLAS). The `native_rocblas` abstraction (ceiling ref, excluded from PPC) achieves ~32,000 GFLOP/s. The comparison is tiled-HIP vs untiled-RAJA, not rocBLAS vs untiled-RAJA. The efficiency gap is algorithmic, not a library-vs-kernel artefact.
+
+**julia_naive (eff=0.306):**
+Julia's `CuArray`/`ROCArray` uses column-major storage. On NVIDIA (see §3), the column-major layout gave a coalescing advantage (P005) that pushed julia_naive *above* the native tiled baseline (fresh-state eff≈1.25–1.29). On AMD MI300X the result is 2,211 GFLOP/s vs native 7,214 GFLOP/s (eff=0.306). Two compounding factors:
+
+1. **Native HIP baseline is substantially higher on AMD** (7,214 vs ~176 GFLOP/s on the RTX 5060 laptop). The AMD tiled HIP DGEMM is more efficient relative to the hardware, leaving less room for julia_naive's column-major coalescing advantage to matter.
+2. **AMDGPU.jl vs CUDA.jl kernel codegen differ.** The P005 column-major advantage observed on NVIDIA arises from a specific thread↔row mapping in the Julia naive kernel. AMDGPU.jl may generate a different register allocation or memory access pattern. Without a fresh-state AMD profiling run (not currently justified given the by-design nature of the result), this cannot be confirmed.
+
+**Taxonomy classification (AMD):**
+
+| Config | Benchmark eff | Root Cause | Pattern | Needs profiling? |
+|---|---|---|---|---|
+| raja_naive / large | 0.189 | Untiled kernel — API cannot express tiling | P004 API Limitation | **No — by design** |
+| julia_naive / large | 0.306 | Tiled native is ~4× more efficient on AMD; P005 advantage insufficient to close gap | P004 + P005 absent | **No — by design** |
+
+**Action taken:** Both AMD entries removed from `profiling_queue.csv`. `compute_ppc.py::flag_for_profiling()` updated to exclude `API_LIMITATION_ABSTRACTIONS = {raja_naive, julia_naive}` from future queue entries.
+
+---
+
 ## 7. Files Generated This Session
 
 | File | Description |

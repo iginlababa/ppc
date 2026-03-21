@@ -40,11 +40,12 @@ done
 
 mkdir -p "${DATA_RAW}"
 
-# ── Problem sizes (D1: sides 32/128/256) ─────────────────────────────────────
+# ── Problem sizes (D1: sides 32/128/256/512) ─────────────────────────────────
 declare -A SIZES
 SIZES[small]=32
 SIZES[medium]=128
 SIZES[large]=256
+SIZES[xlarge]=512   # exceeds MI300X L2 → valid DRAM-bandwidth measurement
 
 # ── Abstraction registry ──────────────────────────────────────────────────────
 declare -A BINARY_NAME   # abstraction → executable stem
@@ -160,7 +161,7 @@ else
 fi
 
 if [[ "${SIZE}" == "all" ]]; then
-    run_sizes=(small medium large)
+    run_sizes=(small medium large xlarge)
 else
     run_sizes=("${SIZE}")
 fi

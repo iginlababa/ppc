@@ -1,10 +1,13 @@
 // kernel_stencil_kokkos.cpp — E3 3D Stencil: Kokkos MDRangePolicy<Rank<3>>.
 //
 // ── E3 DESIGN DECISIONS ───────────────────────────────────────────────────────
-// [D4-Kokkos] MDRangePolicy<Rank<3>> with Tiling{2,4,32}: the innermost tile
-//   extent (ix-direction) of 32 maps to consecutive warp threads, preserving
-//   coalescing. Kokkos selects CUDA block layout automatically via the tiling
-//   hint. This is idiomatic Kokkos for 3D stencils — no TeamPolicy needed.
+// [D4-Kokkos] MDRangePolicy<Rank<3>> tiling hint controls blockDim layout.
+//   Tile maps as {iz_tile, iy_tile, ix_tile} → {blockDim.z, blockDim.y, blockDim.x}.
+//   NVIDIA (warp-32):  {2,4,32}  → blockDim=(32,4,2)=256 threads; ix-tile=32=1 warp.
+//   AMD    (wave-64):  {1,8,64}  → blockDim=(64,8,1)=512 threads; ix-tile=64=1 wavefront.
+//   The innermost tile extent (ix) must match the hardware SIMT width so that
+//   all threads in one warp/wavefront access consecutive ix memory → coalesced.
+//   A tile of 32 on AMD wastes half each wavefront; {1,8,64} fixes this.
 //   Memory layout: LayoutRight (row-major) matches CUDA and RAJA baselines.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -32,9 +35,15 @@ void run_stencil_kokkos(int N, double c0, double c1,
 
     using MDPol = Kokkos::MDRangePolicy<ExecSpace, Kokkos::Rank<3>>;
 
+#ifdef KOKKOS_ENABLE_HIP
+    constexpr int T_Z = 1, T_Y = 8, T_X = 64;  // wave64: ix-tile=64=1 wavefront
+#else
+    constexpr int T_Z = 2, T_Y = 4, T_X = 32;  // warp32: ix-tile=32=1 warp
+#endif
+
     Kokkos::parallel_for(
         "stencil7pt_kokkos",
-        MDPol({1, 1, 1}, {N-1, N-1, N-1}, {2, 4, 32}),
+        MDPol({1, 1, 1}, {N-1, N-1, N-1}, {T_Z, T_Y, T_X}),
         KOKKOS_LAMBDA(int iz, int iy, int ix) {
             out_v(iz, iy, ix) = c0 * in_v(iz, iy, ix)
                 + c1 * (in_v(iz, iy, ix-1) + in_v(iz, iy, ix+1)
