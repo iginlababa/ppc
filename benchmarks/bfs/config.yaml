@@ -28,24 +28,34 @@ timing:
 abstractions:
   - native
   - kokkos
-  - raja         # partial
-  - sycl         # partial
-  - julia        # partial
+  - raja
+  - sycl
+  - julia
 
 platforms:
-  - nvidia_a100
-  - amd_mi250x
-  - intel_pvc
+  - nvidia_rtx5060
+  - amd_mi300x
+
+platform_abstractions:
+  nvidia_rtx5060: [native, kokkos, raja, julia]
+  amd_mi300x:     [native, kokkos, raja, sycl, julia]
 
 availability_notes:
-  raja: "RAJA BFS uses custom worklist — may not be available for all backends"
-  sycl: "SYCL BFS implementation availability depends on vendor"
-  julia: "Experimental — mark partial if JIT warm-up exceeds 30s"
+  sycl:
+    nvidia_rtx5060: "SKIP — no SYCL compiler available on RTX 5060"
+    amd_mi300x:     "AdaptiveCpp acpp --acpp-targets=hip:gfx942; predicted <25% efficiency on 2d_grid large (511 q.wait() HSA dispatches per BFS run)"
+  julia: "Experimental — AMDGPU.jl @eval pattern for kernel launch dispatch"
+
+platform_notes:
+  amd_mi300x:
+    native: "bfs-hip binary (HIP port of CUDA kernel; hipcc --offload-arch=gfx942)"
+    sycl:   "AdaptiveCpp acpp --acpp-targets=hip:gfx942; atomic_ref compact avoids DPL dependency; n_levels q.wait() calls dominate runtime on 2d_grid"
 
 notes:
-  - "Limits test — expected to show abstraction failure"
+  - "Limits test — expected to show abstraction failure modes"
   - "Irregular memory access, extreme load imbalance, control flow divergence, atomics"
   - "Feeds taxonomy irregular patterns category"
+  - "SYCL HSA dispatch overhead × n_levels is primary bottleneck on AMD (P001 pattern)"
 
 correctness:
   tolerance: 0     # BFS result is exact — vertex counts must match exactly

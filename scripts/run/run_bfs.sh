@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run E6 BFS benchmarks.
 # Usage: ./scripts/run/run_bfs.sh [--platform nvidia_rtx5060] [--reps 30]
+#        ./scripts/run/run_bfs.sh [--platform amd_mi300x] [--abstraction kokkos] [--reps 30]
 #
 # Loops: abstraction × graph_type × problem_size
 # Emits raw CSVs to data/raw/bfs_{abs}_{platform}_{date}.csv
@@ -18,7 +19,6 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-BIN_DIR="${REPO_ROOT}/bin/bfs"
 DATA_RAW="${REPO_ROOT}/data/raw"
 mkdir -p "${DATA_RAW}"
 
@@ -36,21 +36,64 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+VENDOR="${PLATFORM%%_*}"   # "nvidia" or "amd"
+
 # ── Abstractions and sizes ─────────────────────────────────────────────────────
-ABSTRACTIONS=("native" "kokkos" "raja" "julia")
 GRAPH_TYPES=("erdos_renyi" "2d_grid")
 declare -A SIZES=([small]=1024 [medium]=16384 [large]=65536)
 SIZE_ORDER=("small" "medium" "large")
 
+# ── Platform-specific registry ────────────────────────────────────────────────
+declare -A BINARY_NAME
+declare -A BINARY_DIR
+
+if [[ "${VENDOR}" == "amd" ]]; then
+    BINARY_NAME[native]="bfs-hip"
+    BINARY_DIR[native]="hip"
+    ALL_ABSTRACTIONS=(native kokkos raja sycl julia)
+    export JULIA_GPU_BACKEND="amdgpu"
+else
+    BINARY_NAME[native]="bfs-native"
+    BINARY_DIR[native]="bin/bfs"   # flat structure for NVIDIA
+    ALL_ABSTRACTIONS=(native kokkos raja julia)
+    # numba: UNSUPPORTED_CC120; sycl: NO_COMPILER on RTX 5060
+fi
+
+BINARY_NAME[kokkos]="bfs-kokkos"; BINARY_DIR[kokkos]="kokkos"
+BINARY_NAME[raja]="bfs-raja";     BINARY_DIR[raja]="raja"
+BINARY_NAME[sycl]="bfs-sycl";     BINARY_DIR[sycl]="sycl"
+BINARY_NAME[julia]="bfs-julia";   BINARY_DIR[julia]="julia"
+
+# ── Binary finder ─────────────────────────────────────────────────────────────
+find_binary() {
+    local abs="$1"
+    local bin_name="${BINARY_NAME[$abs]}"
+
+    if [[ "${VENDOR}" == "amd" ]]; then
+        # AMD: binaries in build/bfs/{dir}_{PLATFORM}/
+        local dir_stem="${BINARY_DIR[$abs]:-${abs}}"
+        local p="${REPO_ROOT}/build/bfs/${dir_stem}_${PLATFORM}/${bin_name}"
+        [[ -x "${p}" ]] && { echo "${p}"; return 0; }
+        # fallback: search all build subdirs
+        for d in "${REPO_ROOT}/build/bfs/"/*/; do
+            if [[ -x "${d}${bin_name}" ]]; then
+                [[ "${d}" == *"${PLATFORM}"* ]] && { echo "${d}${bin_name}"; return 0; }
+            fi
+        done
+        echo ""
+    else
+        # NVIDIA: flat bin/bfs/ directory
+        local p="${REPO_ROOT}/bin/bfs/${bin_name}"
+        [[ -x "${p}" ]] && { echo "${p}"; return 0; }
+        echo ""
+    fi
+}
+
 # ── CSV header ────────────────────────────────────────────────────────────────
 CSV_HEADER="timestamp,experiment_id,kernel,abstraction,platform,graph_type,problem_size,n_vertices,n_edges,n_levels,max_frontier_width,min_frontier_width,peak_frontier_fraction,run_id,execution_time_ms,throughput_gflops,hw_state_verified"
-
 PROFILE_HEADER="timestamp,platform,graph_type,problem_size,n_vertices,n_levels,frontier_widths"
 
 # ── Parse BFS_RUN output line into CSV ────────────────────────────────────────
-# BFS_RUN run=N n_vertices=V n_edges=E n_levels=L max_fw=M min_fw=m
-#         peak_ff=F graph=TYPE size=S time_ms=T throughput_gflops=G
-# BFS_HW_STATE state=H
 write_csv_from_output() {
     local output="$1"
     local abs_name="$2"
@@ -62,7 +105,6 @@ write_csv_from_output() {
     local hw_state=1
     local ts
     ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
     local profile_written=false
 
     while IFS= read -r line; do
@@ -72,7 +114,6 @@ write_csv_from_output() {
                 nl=$(echo "${line}" | grep -oP 'n_levels=\K[0-9]+')
                 widths=$(echo "${line}" | grep -oP 'widths=\K[^[:space:]]+')
                 local n_v="${SIZES[${size_label}]}"
-                # Quote widths field — it contains commas, would break CSV otherwise
                 echo "${ts},${PLATFORM},${graph_type},${size_label},${n_v},${nl},\"${widths}\"" \
                     >> "${profile_file}"
                 profile_written=true
@@ -104,29 +145,48 @@ write_csv_from_output() {
     done <<< "${output}"
 }
 
-# ── Main loop ─────────────────────────────────────────────────────────────────
-for abs_name in "${ABSTRACTIONS[@]}"; do
-    if [[ "${ABSTRACTION}" != "all" && "${ABSTRACTION}" != "${abs_name}" ]]; then
-        continue
-    fi
+# ── Build abstraction list ─────────────────────────────────────────────────────
+if [[ "${ABSTRACTION}" == "all" ]]; then
+    run_abstractions=("${ALL_ABSTRACTIONS[@]}")
+else
+    run_abstractions=("${ABSTRACTION}")
+fi
 
-    BIN="${BIN_DIR}/bfs-${abs_name}"
-    if [[ ! -x "${BIN}" ]]; then
-        echo "[run_bfs] SKIP ${abs_name}: binary not found at ${BIN}"
+echo "[run_bfs] ================================================================"
+echo "[run_bfs] Platform:      ${PLATFORM}"
+echo "[run_bfs] Reps:          ${REPS}"
+echo "[run_bfs] Abstractions:  ${run_abstractions[*]}"
+echo "[run_bfs] Graph types:   ${GRAPH_TYPES[*]}"
+echo "[run_bfs] Sizes:         ${SIZE_ORDER[*]}"
+if [[ "${VENDOR}" == "amd" ]]; then
+    echo "[run_bfs] Note:          numba=SKIP (numba-hip experimental)"
+    echo "[run_bfs] Note:          JULIA_GPU_BACKEND=amdgpu"
+else
+    echo "[run_bfs] Note:          numba=UNSUPPORTED_CC120, sycl=NO_COMPILER"
+fi
+echo "[run_bfs] ================================================================"
+
+# ── Main loop ─────────────────────────────────────────────────────────────────
+for abs_name in "${run_abstractions[@]}"; do
+    BIN="$(find_binary "${abs_name}")"
+    if [[ -z "${BIN}" || ! -x "${BIN}" ]]; then
+        echo "[run_bfs] SKIP ${abs_name}: binary not found (run build_bfs.sh first)"
         continue
     fi
 
     CSV_FILE="${DATA_RAW}/bfs_${abs_name}_${PLATFORM}_${DATE}.csv"
     PROFILE_FILE="${DATA_RAW}/bfs_profile_${PLATFORM}_${DATE}.csv"
 
-    # Write headers if files are new
     [[ ! -f "${CSV_FILE}" ]]     && echo "${CSV_HEADER}"     > "${CSV_FILE}"
     [[ ! -f "${PROFILE_FILE}" ]] && echo "${PROFILE_HEADER}" > "${PROFILE_FILE}"
 
     for graph_type in "${GRAPH_TYPES[@]}"; do
         for size_label in "${SIZE_ORDER[@]}"; do
             N="${SIZES[${size_label}]}"
-            echo "[run_bfs] Running ${abs_name} graph=${graph_type} size=${size_label} n=${N} reps=${REPS}"
+            echo ""
+            echo "[run_bfs] ── ${abs_name} / ${graph_type} / ${size_label} (N=${N}) ──────────────"
+            echo "[run_bfs]    binary: ${BIN}"
+            echo "[run_bfs]    csv:    ${CSV_FILE}"
 
             OUTPUT=$("${BIN}" \
                 --graph "${graph_type}" \
@@ -139,11 +199,15 @@ for abs_name in "${ABSTRACTIONS[@]}"; do
                 "${OUTPUT}" "${abs_name}" "${graph_type}" "${size_label}" \
                 "${CSV_FILE}" "${PROFILE_FILE}"
 
-            echo "[run_bfs] Done ${abs_name} ${graph_type} ${size_label}"
+            echo "[run_bfs]    → rows appended to ${CSV_FILE}"
         done
     done
     echo "[run_bfs] ${abs_name} complete → ${CSV_FILE}"
 done
 
-echo "[run_bfs] All done.  Raw CSVs:"
+echo ""
+echo "[run_bfs] ================================================================"
+echo "[run_bfs] Done. CSV files:"
 ls -lh "${DATA_RAW}"/bfs_*"${PLATFORM}"*"${DATE}"* 2>/dev/null || true
+echo "[run_bfs] ================================================================"
+echo "[run_bfs] Next step: python3 scripts/analysis/process_e6.py"
