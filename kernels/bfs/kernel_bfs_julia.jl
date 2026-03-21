@@ -39,7 +39,7 @@ if _GPU_BACKEND == "amdgpu"
         copyto!(arr, idx, h, 1, 1)
     end
 
-    @eval @inline _atomic_cas!(ptr, cmp, val) = AMDGPU.atomic_cas!(ptr, cmp, val)
+    @eval @inline _atomic_cas!(ptr, cmp, val) = AMDGPU.Device.llvm_atomic_cas(ptr, cmp, val)
 
     @eval function _bfs_scatter_launch!(blocks, fs, d_frontier, d_row_ptr,
                                          d_col_idx, d_distances, d_flags, level)

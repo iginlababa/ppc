@@ -79,8 +79,8 @@ if [[ "${VENDOR}" == "amd" ]]; then
     [[ "${CLEAN}" == "true" ]] && rm -rf "${BUILD_BASE}"
     mkdir -p "${BUILD_BASE}"
 
-    HIP_FLAGS="-O3 -ffast-math --offload-arch=${HIP_ARCH} -I${KERNEL_DIR} -std=c++17"
     ROCM_ROOT="${ROCM_PATH:-/opt/rocm}"
+    HIP_FLAGS="-O3 -ffast-math --offload-arch=${HIP_ARCH} -I${KERNEL_DIR} -std=c++17"
 
     echo "[build_bfs] =============================================================="
     echo "[build_bfs] Platform:    ${PLATFORM}"
@@ -90,11 +90,6 @@ if [[ "${VENDOR}" == "amd" ]]; then
     echo "[build_bfs] Skipped:     numba (AMD: numba-hip experimental)"
     echo "[build_bfs] =============================================================="
 
-    # ── Kokkos / RAJA library dirs ──────────────────────────────────────────
-    KOKKOS_INC="${KOKKOS_ROOT}/include"
-    KOKKOS_LIB_DIR="$(ls -d "${KOKKOS_ROOT}/lib" "${KOKKOS_ROOT}/lib64" 2>/dev/null | head -1)"
-    RAJA_INC="${RAJA_ROOT}/include"
-    RAJA_LIB_DIR="$(ls -d "${RAJA_ROOT}/lib" "${RAJA_ROOT}/lib64" 2>/dev/null | head -1)"
     CAMP_LIBS=""
     [[ -n "${CAMP_LIB}" ]] && CAMP_LIBS="-L${CAMP_LIB}/lib -lcamp"
 
@@ -115,6 +110,8 @@ if [[ "${VENDOR}" == "amd" ]]; then
         echo "[build_bfs] Building bfs-kokkos (Kokkos HIP backend, two-step) ..."
         OUT_KK="${BUILD_BASE}/kokkos_${PLATFORM}"
         mkdir -p "${OUT_KK}"
+        KOKKOS_INC="${KOKKOS_ROOT}/include"
+        KOKKOS_LIB_DIR="$(for d in "${KOKKOS_ROOT}/lib" "${KOKKOS_ROOT}/lib64"; do [[ -d "$d" ]] && echo "$d" && break; done)"
         hipcc ${HIP_FLAGS} \
             -I"${KOKKOS_INC}" \
             -DKOKKOS_ENABLE_HIP=1 \
@@ -136,6 +133,8 @@ if [[ "${VENDOR}" == "amd" ]]; then
         echo "[build_bfs] Building bfs-raja (RAJA HIP backend, two-step) ..."
         OUT_RAJA="${BUILD_BASE}/raja_${PLATFORM}"
         mkdir -p "${OUT_RAJA}"
+        RAJA_INC="${RAJA_ROOT}/include"
+        RAJA_LIB_DIR="$(for d in "${RAJA_ROOT}/lib" "${RAJA_ROOT}/lib64"; do [[ -d "$d" ]] && echo "$d" && break; done)"
         hipcc ${HIP_FLAGS} \
             -I"${RAJA_INC}" \
             -D__HIP_PLATFORM_AMD__ \
@@ -180,7 +179,7 @@ if [[ "${VENDOR}" == "amd" ]]; then
     cat > "${OUT_JULIA}/bfs-julia" <<'JULIA_WRAPPER'
 #!/usr/bin/env bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 exec julia --project="${REPO_ROOT}" \
     "${REPO_ROOT}/kernels/bfs/kernel_bfs_julia.jl" "$@"
 JULIA_WRAPPER

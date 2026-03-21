@@ -1,10 +1,10 @@
-// kernel_bfs_hip.cpp — E6 BFS: native HIP with ROCThrust compact.
+// kernel_bfs_hip.cpp — E6 BFS: native HIP with atomic-counter compact.
 //
 // Mechanical port of kernel_bfs_cuda.cu.  Changes:
 //   - #include <hip/hip_runtime.h> instead of cuda_runtime.h
-//   - Thrust includes unchanged — hipcc auto-routes to ROCThrust backend
 //   - HIP_CHECK macro replaces CUDA_CHECK
-//   - All cuda* API calls replaced with hip* equivalents
+//   - thrust::copy_if replaced by bfs_compact_kernel (atomicAdd counter)
+//     avoids ROCThrust/rocprim header conflicts on ROCm 6.x installs.
 //   - Kernel body (bfs_scatter_kernel) unchanged:
 //     __global__, blockIdx.x, threadIdx.x, atomicCAS all have identical HIP syntax.
 //
@@ -12,8 +12,9 @@
 // [D3-HIP] Two phases per BFS level:
 //   Scatter: bfs_scatter_kernel — one thread per frontier vertex.
 //            atomicCAS on d_distances[v]; sets d_flags[v]=1 on first discovery.
-//   Compact: thrust::copy_if over [0,N) with d_flags as stencil → d_next_frontier.
-//            hipDeviceSynchronize() after scatter before Thrust compact.
+//   Compact: bfs_compact_kernel — one thread per vertex in [0,N).
+//            atomicAdd on d_next_size counter; writes flagged vertices to
+//            d_next_frontier.  hipDeviceSynchronize() after each phase.
 //            After compact: hipMemset d_flags to 0.
 // [D5-HIP] Metric: GTEPS = n_edges / time_s / 1e9.  Stored in throughput_gflops.
 // [D7-HIP] d_distances reset to -1 (source = 0) excluded from timed region.
@@ -26,10 +27,6 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
-#include <thrust/copy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/execution_policy.h>
-#include <thrust/iterator/counting_iterator.h>
 
 #include "bfs_common.h"
 
@@ -70,6 +67,23 @@ __global__ void bfs_scatter_kernel(
     }
 }
 
+// ── Compact kernel ────────────────────────────────────────────────────────────
+// One thread per vertex: if d_flags[v] != 0, atomicAdd to get a slot in
+// d_next_frontier.  Replaces thrust::copy_if to avoid ROCThrust header issues.
+__global__ void bfs_compact_kernel(
+    const int* __restrict__ d_flags,
+    int                     n_vertices,
+    int* __restrict__       d_next_frontier,
+    int*                    d_next_size)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n_vertices) return;
+    if (d_flags[tid]) {
+        int pos = atomicAdd(d_next_size, 1);
+        d_next_frontier[pos] = tid;
+    }
+}
+
 // ── Main BFS driver ───────────────────────────────────────────────────────────
 static double run_bfs_hip(
     const int*  d_row_ptr,
@@ -79,6 +93,7 @@ static double run_bfs_hip(
     int*        d_frontier,
     int*        d_next_frontier,
     int*        d_flags,
+    int*        d_next_size,
     int         /* n_expected_levels */)
 {
     int frontier_size = 1;
@@ -88,7 +103,9 @@ static double run_bfs_hip(
     auto t0 = std::chrono::high_resolution_clock::now();
 
     int level = 1;
+    int comp_blocks = (n_vertices + BFS_BLOCK_SIZE - 1) / BFS_BLOCK_SIZE;
     while (frontier_size > 0) {
+        // Scatter phase
         int blocks = (frontier_size + BFS_BLOCK_SIZE - 1) / BFS_BLOCK_SIZE;
         bfs_scatter_kernel<<<blocks, BFS_BLOCK_SIZE>>>(
             d_frontier, frontier_size,
@@ -96,19 +113,13 @@ static double run_bfs_hip(
             d_distances, d_flags, level);
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Compact: copy vertex IDs where d_flags[v] != 0 into d_next_frontier.
-        // hipcc auto-selects the ROCm/HIP Thrust backend.
-        thrust::device_ptr<int> flags_ptr(d_flags);
-        thrust::device_ptr<int> next_ptr(d_next_frontier);
-        auto end_ptr = thrust::copy_if(
-            thrust::device,
-            thrust::counting_iterator<int>(0),
-            thrust::counting_iterator<int>(n_vertices),
-            flags_ptr,
-            next_ptr,
-            [] __device__(int f) { return f != 0; });
-
-        frontier_size = (int)(end_ptr - next_ptr);
+        // Compact phase — atomic counter, no Thrust dependency
+        HIP_CHECK(hipMemset(d_next_size, 0, sizeof(int)));
+        bfs_compact_kernel<<<comp_blocks, BFS_BLOCK_SIZE>>>(
+            d_flags, n_vertices, d_next_frontier, d_next_size);
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipMemcpy(&frontier_size, d_next_size, sizeof(int),
+                            hipMemcpyDeviceToHost));
 
         // Reset flags
         HIP_CHECK(hipMemset(d_flags, 0, n_vertices * sizeof(int)));
@@ -157,6 +168,7 @@ int main(int argc, char** argv) {
     int* d_frontier;
     int* d_next_frontier;
     int* d_flags;
+    int* d_next_size;
     int  n_col = (int)g.col_idx.size();
 
     HIP_CHECK(hipMalloc(&d_row_ptr,       (cfg.n + 1) * sizeof(int)));
@@ -165,6 +177,7 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMalloc(&d_frontier,      cfg.n       * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_next_frontier, cfg.n       * sizeof(int)));
     HIP_CHECK(hipMalloc(&d_flags,         cfg.n       * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_next_size,     sizeof(int)));
 
     HIP_CHECK(hipMemcpy(d_row_ptr, g.row_ptr.data(), (cfg.n+1)*sizeof(int),
                         hipMemcpyHostToDevice));
@@ -177,7 +190,7 @@ int main(int argc, char** argv) {
         reset_distances(d_distances, cfg.n);
         run_bfs_hip(d_row_ptr, d_col_idx, cfg.n,
                     d_distances, d_frontier, d_next_frontier, d_flags,
-                    ref.n_levels);
+                    d_next_size, ref.n_levels);
         std::vector<int> dist_gpu(cfg.n);
         HIP_CHECK(hipMemcpy(dist_gpu.data(), d_distances, cfg.n*sizeof(int),
                             hipMemcpyDeviceToHost));
@@ -197,7 +210,7 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemset(d_flags, 0, cfg.n * sizeof(int)));
         return run_bfs_hip(d_row_ptr, d_col_idx, cfg.n,
                            d_distances, d_frontier, d_next_frontier, d_flags,
-                           ref.n_levels);
+                           d_next_size, ref.n_levels);
     }, "hip");
 
     // ── Timed runs ────────────────────────────────────────────────────────────
@@ -208,7 +221,7 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipMemset(d_flags, 0, cfg.n * sizeof(int)));
         double ms = run_bfs_hip(d_row_ptr, d_col_idx, cfg.n,
                                 d_distances, d_frontier, d_next_frontier,
-                                d_flags, ref.n_levels);
+                                d_flags, d_next_size, ref.n_levels);
         times.push_back(ms);
     }
 
@@ -231,5 +244,6 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipFree(d_frontier));
     HIP_CHECK(hipFree(d_next_frontier));
     HIP_CHECK(hipFree(d_flags));
+    HIP_CHECK(hipFree(d_next_size));
     return 0;
 }

@@ -84,29 +84,20 @@ static double run_bfs_raja(
             });
         RAJA::synchronize<RajaSync>();
 
-        // ── Compact: exclusive_scan → gather ──────────────────────────────
-        RAJA::exclusive_scan<RajaExec>(
-            d_flags, d_flags + n_vertices,
-            d_scan, 0, RAJA::operators::plus<int>{});
-        RAJA::synchronize<RajaSync>();
-
-        // Gather new frontier
+        // ── Compact: atomic counter (replaces exclusive_scan — avoids API issues) ──
+        GPU_CHECK(gpuMemset(d_scan, 0, sizeof(int)));  // d_scan[0] = counter
         RAJA::forall<RajaExec>(
             RAJA::RangeSegment(0, n_vertices),
             [=] RAJA_DEVICE(int i) {
                 if (d_flags[i]) {
-                    d_next_frontier[d_scan[i]] = i;
+                    int pos = atomicAdd(d_scan, 1);
+                    d_next_frontier[pos] = i;
                 }
             });
         RAJA::synchronize<RajaSync>();
 
-        // New frontier size from last scan element + last flag
-        int scan_last = 0, flag_last = 0;
-        GPU_CHECK(gpuMemcpy(&scan_last, d_scan    + n_vertices - 1,
-                              sizeof(int), gpuMemcpyDeviceToHost));
-        GPU_CHECK(gpuMemcpy(&flag_last, d_flags   + n_vertices - 1,
-                              sizeof(int), gpuMemcpyDeviceToHost));
-        frontier_size = scan_last + flag_last;
+        GPU_CHECK(gpuMemcpy(&frontier_size, d_scan, sizeof(int),
+                              gpuMemcpyDeviceToHost));
 
         // Reset flags
         GPU_CHECK(gpuMemset(d_flags, 0, n_vertices * sizeof(int)));
