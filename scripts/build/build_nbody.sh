@@ -36,6 +36,7 @@ mkdir -p "${BIN_DIR}"
 # ── CUDA arch detection ────────────────────────────────────────────────────────
 case "${PLATFORM}" in
     *rtx5060*|*blackwell*) CUDA_ARCH="sm_120" ;;
+    *h100*|*hopper*)       CUDA_ARCH="sm_90"  ;;
     *a100*|*ampere*)       CUDA_ARCH="sm_80"  ;;
     *v100*|*volta*)        CUDA_ARCH="sm_70"  ;;
     *rtx30*|*ga10*)        CUDA_ARCH="sm_86"  ;;
