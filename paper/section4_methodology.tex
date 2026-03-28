@@ -1,62 +1,459 @@
 % §4 Methodology
-% Status: In progress
+% Status: Revised 2026-03-23 — full rewrite reflecting E1–E7 actual protocols.
 
 \section{Methodology}
 \label{sec:methodology}
 
-\subsection{Experimental Design}
+This section describes the experimental design, workload selection, abstraction
+implementations, measurement protocols, and profiling methodology used to
+systematically characterize abstraction effectiveness. A central feature of this
+methodology is its empirical grounding: several protocol decisions reported here
+were not assumed \emph{a priori} but were discovered and validated during
+experimental execution. Where the protocol departs from common practice, we
+explain the empirical motivation. The complete experimental artifact---benchmark
+source code, build scripts, raw CSV data, analysis notebooks, and profiling
+traces---will be released on Zenodo with a permanent DOI.
 
-We evaluate $5$ abstraction layers (native CUDA/HIP, Kokkos, RAJA, SYCL, Julia)
-across $3$ hardware platforms and $7$ representative kernels, yielding
-$315$ distinct configurations (5 abstractions $\times$ 3 platforms $\times$ 3 sizes $\times$ 7 kernels).
-Each configuration is executed $30$ times, producing $9{,}450$ individual timed kernel executions.
+% -----------------------------------------------------------------------
+\subsection{Experimental Design: Three-Dimensional Matrix}
+\label{subsec:3d-matrix}
+% -----------------------------------------------------------------------
 
+We structure our experiments as a three-dimensional matrix crossing workload
+type, abstraction layer, and target architecture, ensuring systematic coverage
+of the abstraction effectiveness space.
+
+\begin{table}[h]
+\centering
+\caption{Three-dimensional experimental matrix.}
+\label{tab:3d-matrix}
+\begin{tabular}{p{2.5cm}p{5.5cm}p{5.5cm}}
+\hline
+\textbf{Dimension} & \textbf{Categories} & \textbf{Justification} \\
+\hline
+Workloads (7)
+  & Regular, Semi-irregular, Irregular
+  & Full spectrum of computational predictability \\[4pt]
+Abstractions (4)
+  & Kokkos, RAJA, SYCL, Julia (+ native baseline)
+  & Dominant portability approaches in production codes~\cite{Evans2022} \\[4pt]
+Architectures (2)
+  & NVIDIA RTX~5060 (Blackwell), AMD MI300X (CDNA3)
+  & Two GPU architectures with distinct memory technologies and execution
+    models \\
+\hline
+\end{tabular}
+\end{table}
+
+The full matrix yields over \textbf{190 measured configurations} across 3--4
+problem sizes per workload and 30 timed runs per configuration. Not all cells
+are populated: SYCL is unavailable on the RTX~5060 for most kernels (no
+AdaptiveCpp CUDA backend at time of testing), and Numba is excluded entirely
+due to compute capability~12.0 / PTX~9.2 incompatibility
+(Section~\ref{subsec:abstraction}).
+
+The matrix design enables controlled comparison: by holding two dimensions
+constant while varying the third, we isolate the contribution of each factor
+to observed performance differences.
+
+% -----------------------------------------------------------------------
+\subsection{Target Hardware Platforms}
+\label{subsec:hw-method}
+% -----------------------------------------------------------------------
+
+Hardware specifications and architectural differences are described in
+Section~\ref{subsec:hardware} (Table~\ref{tab:hardware}). The NVIDIA RTX~5060
+serves as a Blackwell architecture portability target; the AMD MI300X serves as
+the primary HPC platform. The two platforms differ substantially in memory
+technology (GDDR7 vs.\ HBM3), measured bandwidth (288 vs.\ 5300\,GB/s), and
+thread execution model (warp-32 vs.\ wavefront-64). This platform class
+asymmetry is intentional: the study evaluates abstraction portability
+\emph{behavior} across architectures, not cross-platform throughput
+comparability. PPC values measure efficiency relative to native on each
+platform independently (Equation~\ref{eq:efficiency}).
+
+% -----------------------------------------------------------------------
+\subsection{Workload Selection}
+\label{subsec:workloads}
+% -----------------------------------------------------------------------
+
+We select seven kernels spanning the full spectrum of computational regularity,
+because prior work suggests that abstraction effectiveness is strongly
+correlated with workload structure~\cite{Godoy2023, Evans2022}. Rather than
+implementing kernels from scratch, we leverage established benchmark suites to
+minimise implementation bias.
+
+\subsubsection{Regular Workloads}
+
+\textbf{E1 --- STREAM Triad} (BabelStream~\cite{Deakin2019}):
+$A[i] = B[i] + s \cdot C[i]$. Perfectly regular, bandwidth-bound
+($\sim$0.25\,FLOP/byte), embarrassingly parallel. Establishes the performance
+ceiling for memory-bound portability: if an abstraction cannot achieve
+near-native performance here, it cannot achieve it anywhere.
+
+\textbf{E2 --- Dense Matrix Multiplication (DGEMM)} (RAJAPerf Suite, Julia
+microbenchmarks~\cite{Godoy2023}): Compute-bound ($\sim$16--64\,FLOP/byte
+depending on blocking), sensitive to memory layout and shared-memory tiling
+quality. Tests whether abstractions can express optimal algorithms
+(Section~\ref{sec:taxonomy}, pattern P004).
+
+\textbf{E3 --- 3D Stencil} (7-point Jacobi): Structured grid, memory-bound
+(AI $\approx 0.203$\,FLOP/byte). Tests multi-dimensional indexing abstractions
+and tiling policy overhead (Section~\ref{sec:taxonomy}, pattern P006).
+
+\subsubsection{Semi-Irregular Workloads}
+
+\textbf{E4 --- Sparse Matrix-Vector Multiplication (SpMV)} (CSR format):
+Irregular memory access driven by sparsity pattern. We test three matrix classes
+--- structured (2D/3D Laplacian), power-law (Pareto $\gamma = 2.5$), and random
+(Erd\H{o}s--R\'enyi) --- to isolate the effect of load imbalance on abstraction
+overhead (Section~\ref{sec:taxonomy}, pattern P007).
+
+\textbf{E5 --- Sparse Triangular Solve (SpTRSV)} (level-set parallel):
+Inherent sequential dependencies require level-set scheduling, producing many
+short kernel launches per solve. Tests dispatch amplification overhead
+(Section~\ref{sec:taxonomy}, pattern P008).
+
+\subsubsection{Irregular Workloads}
+
+\textbf{E6 --- Breadth-First Search (BFS)} (level-synchronous, GAP Benchmark):
+Extreme load imbalance, control-flow divergence, and atomic operations.
+Represents the stress test for portability frameworks.
+
+\textbf{E7 --- N-Body Force Calculation} (Lennard-Jones, CSR neighbor list):
+Irregular neighbor lists with cutoff radius. High arithmetic intensity but
+irregular memory access. Tests dispatch amortization across problem sizes.
+
+\begin{table}[h]
+\centering
+\caption{Problem sizes per experiment. Each size is chosen to expose a distinct
+performance regime: small (launch-overhead-dominated), medium (balanced), and
+large (bandwidth- or compute-saturated).}
+\label{tab:problem-sizes}
+\begin{tabular}{lllll}
+\hline
+\textbf{Experiment} & \textbf{Small} & \textbf{Medium} & \textbf{Large}
+& \textbf{XLarge} \\
+\hline
+E1 STREAM   & $2^{20}$ (1M)    & $2^{26}$ (67M)    & $2^{28}$ (268M)  & --- \\
+E2 DGEMM    & $N = 1024$       & $N = 4096$        & $N = 8192$       & --- \\
+E3 Stencil  & $32^3$           & $128^3$           & $256^3$          & $512^3$ \\
+E4 SpMV     & structured 1K    & power-law         & scale 20--22     & --- \\
+E5 SpTRSV   & structured       & random            & circuit          & --- \\
+E6 BFS      & RMAT scale~20    & road network      & Erd\H{o}s--R\'enyi & --- \\
+E7 N-Body   & 32K atoms        & 256K atoms        & 2M atoms         & --- \\
+\hline
+\end{tabular}
+\end{table}
+
+% -----------------------------------------------------------------------
+\subsection{Abstraction Layers and Implementations}
+\label{subsec:abstractions-method}
+% -----------------------------------------------------------------------
+
+Table~\ref{tab:abstractions} summarises the four abstraction layers evaluated
+and their backends on each platform.
+
+\begin{table}[h]
+\centering
+\caption{Abstraction layers evaluated in this study.}
+\label{tab:abstractions}
+\begin{tabular}{lllll}
+\hline
+\textbf{Layer} & \textbf{Version} & \textbf{NVIDIA Backend}
+& \textbf{AMD Backend} & \textbf{Paradigm} \\
+\hline
+Native CUDA/HIP & 12.8 / ROCm 6.x & ---  & ---  & Explicit GPU programming \\
+Kokkos          & 4.x              & CUDA & HIP  & C++ performance portability \\
+RAJA            & 2024.x           & CUDA & HIP  & Loop-level policy abstraction \\
+SYCL (AdaptiveCpp) & 0.9.4+       & ---  & HIP (HSA) & Open-standard heterogeneous \\
+Julia           & 1.10+            & CUDA.jl & AMDGPU.jl & High-level JIT language \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Native CUDA/HIP:} Hand-optimised implementations from benchmark suites
+serve as the performance ceiling on each platform. Best practices are enforced:
+coalesced memory access, occupancy tuning, and shared memory usage where
+applicable.
+
+\textbf{Kokkos~\cite{Carter2014}:} C++ performance portability library with
+\texttt{View}s and \texttt{ExecutionSpace}s. \texttt{TeamPolicy} exposes
+scoped shared-memory allocation (equivalent to CUDA \texttt{\_\_shared\_\_}),
+enabling tiled algorithms where the workload requires it. Widely adopted in ECP
+codes ($\sim$30\% per Evans et al.~\cite{Evans2022}).
+
+\textbf{RAJA~\cite{Hornung2014}:} Abstracts loop-level execution policies via
+templated \texttt{forall} and reduction operations, while leaving memory
+management explicit. RAJA provides no portable API for scoped shared-memory
+allocation; kernels requiring tiling must either use vendor extensions or forgo
+tiling entirely, incurring an algorithmic memory traffic penalty on
+compute-bound workloads (pattern P004).
+
+\textbf{SYCL~\cite{Reyes2020} via AdaptiveCpp:} Open Khronos standard for
+heterogeneous programming. \texttt{local\_accessor} provides portable
+shared-memory access, making SYCL expressive for tiling-dependent kernels.
+On AMD hardware, AdaptiveCpp routes launches through the HSA runtime,
+introducing a per-launch dispatch overhead ($\approx$19\,µs) that becomes
+significant for fine-grained, level-set workloads (pattern P008). SYCL is
+unavailable on our RTX~5060 target via AdaptiveCpp; SYCL results are therefore
+AMD-only for most kernels.
+
+\textbf{Julia~\cite{Bezanson2017}:} High-level language with JIT compilation
+via LLVM. CUDA.jl and AMDGPU.jl generate device code from high-level array
+operations and custom GPU kernels. Julia arrays use column-major storage by
+default, which creates architecture-specific coalescing effects (pattern P005).
+
+\textbf{Numba (excluded):} Numba's CUDA JIT backend does not support Blackwell
+compute capability~12.0 (PTX~9.2 mismatch). Excluded from all experiments.
+
+% -----------------------------------------------------------------------
 \subsection{Measurement Protocol}
+\label{subsec:measurement}
+% -----------------------------------------------------------------------
 
-Every experiment follows a strict protocol to ensure reproducibility:
+\subsubsection{Warmup Protocol}
+\label{subsubsec:warmup}
+
+The warmup protocol is one of the most consequential methodological decisions
+in this study, revised twice based on empirical evidence.
+
+\paragraph{Standard practice.}
+The standard warmup recommendation in the literature is 10 pre-timed
+iterations, intended to amortise JIT compilation overhead and warm
+caches~\cite{Godoy2023}.
+
+\paragraph{E1 revision: memory-bound protocol.}
+Analysis of raw per-run throughput data from E1 (STREAM Triad) revealed that
+10 warmup iterations are insufficient on the RTX~5060. The GDDR7 memory
+controller undergoes an irreversible clock transition (Section~\ref{subsec:thermal})
+requiring approximately 40 sustained high-bandwidth iterations to trigger.
+With only 10 warmup runs, timed measurements begin before the GPU has reached
+its stable operating frequency. We adopt a \textbf{minimum of 50 pre-timed
+warmup iterations} for all memory-bound experiments on the RTX~5060.
+
+\paragraph{E2 revision: compute-bound protocol.}
+Sustained FP64 load on the RTX~5060 causes progressive SM frequency reduction
+that is not resolved by a fixed iteration count. For compute-bound kernels,
+warmup continues until per-iteration throughput variance over a sliding window
+of 10 runs falls below 2\% coefficient of variation. This typically requires
+60--80 iterations.
+
+\paragraph{MI300X protocol.}
+The MI300X uses HBM3 with no dynamic clock behavior. Standard 10-iteration
+warmup is sufficient. The extended protocol is applied conservatively for
+consistency across all platforms.
+
+\subsubsection{Statistical Rigor}
+
+\begin{itemize}
+    \item \textbf{Repetitions:} 30 timed executions per configuration,
+    following the warmup protocol.
+    \item \textbf{Reporting:} Median execution time and interquartile range
+    (IQR). We never report only the mean: GPU kernels exhibit outliers from
+    OS jitter and DVFS that inflate mean values.
+    \item \textbf{Outlier handling:} Runs with \texttt{hw\_state\_verified = 0}
+    (deviating $> 15\%$ from session median, or captured during a thermal
+    transition) are excluded before computing statistics.
+    \item \textbf{System state:} CPU frequency governor locked to performance
+    mode. GPU SM clocks locked via \texttt{nvidia-smi --lock-gpu-clocks}
+    (NVIDIA) or \texttt{rocm-smi --setperflevel high} (AMD) before each
+    session. Memory clocks on the RTX~5060 cannot be locked directly; the
+    warmup protocol compensates.
+\end{itemize}
+
+\subsubsection{Baseline Definition}
+
+The native baseline for PPC computation is defined as:
+
+\begin{quote}
+\emph{The median throughput of the native CUDA or HIP implementation, measured
+in the same hardware thermal regime as all abstraction runs in the same
+experimental session, with \texttt{hw\_state\_verified = 1} for all included
+runs.}
+\end{quote}
+
+\noindent This definition departs from the common practice of using a single
+native measurement as a session-independent reference. The departure is
+motivated by E1: when native and abstraction runs are measured in different
+thermal regimes on the RTX~5060, efficiency ratios reflect hardware state
+differences rather than abstraction overhead, producing spurious variations of
+up to $\sim$29\%. By requiring thermal regime consistency, we ensure that all
+efficiency values are causally attributable to the abstraction layer.
+
+% -----------------------------------------------------------------------
+\subsection{Four-Level Measurement Hierarchy}
+\label{subsec:hierarchy}
+% -----------------------------------------------------------------------
+
+Every configuration proceeds through a four-level measurement hierarchy,
+with deeper levels triggered by performance anomalies at the preceding level.
+Figure~\ref{fig:methodology-pipeline} illustrates the pipeline.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/methodology2.png}
+\caption{Four-level measurement hierarchy. Every configuration enters at
+Level~1; deeper levels are triggered when abstraction efficiency falls below
+$0.85\times$ native. Known API limitations (P004) bypass the profiling queue.}
+\label{fig:methodology-pipeline}
+\end{figure}
+
+\paragraph{Level~1 --- Performance Portability Coefficients.}
+The PPC (Equation~\ref{eq:ppc}) is computed for every configuration. Efficiency
+is always relative to measured native performance, not theoretical peak. PPC
+$\geq 0.80$ denotes excellent portability; $0.60$--$0.80$ acceptable;
+$< 0.60$ poor (Section~\ref{subsec:ppc}).
+
+\paragraph{Level~2 --- Overhead Attribution.}
+Any configuration where abstraction achieves $< 0.85 \times$ native
+performance is automatically flagged for deep profiling. Overhead is decomposed
+into: (i) kernel launch latency and dispatch overhead, (ii) memory transfer
+overhead (explicit copies, page faults, framework-induced extra copies), and
+(iii) resource utilisation gaps (occupancy, achieved bandwidth, L2 cache hit
+rate).
+
+An intentional exception applies: configurations where low efficiency is an
+expected consequence of API limitations (e.g., RAJA and Julia DGEMM, where
+the API cannot express shared-memory tiling) are excluded from the profiling
+queue---their low efficiency is a taxonomy finding (pattern P004), not an
+implementation defect.
+
+Profiling tools: Nsight Systems (\texttt{nsys}) for timeline analysis and
+Nsight Compute (\texttt{ncu}) for kernel-level hardware counters on NVIDIA;
+\texttt{rocprof} for hardware counters and Omniperf for memory hierarchy
+analysis on AMD.
+
+\paragraph{Level~3 --- Root Cause Analysis.}
+Performance gaps identified at Level~2 are classified into one of four root
+cause categories:
 
 \begin{enumerate}
-    \item \textbf{Hardware lock} --- GPU and memory clocks locked to maximum stable
-          frequency; persistence mode enabled. Results from unlocked hardware are
-          not reported.
-    \item \textbf{Environment log} --- all software versions recorded before each session.
-    \item \textbf{Warm-up} --- 10 executions (never recorded) to amortize JIT compilation
-          (Julia), warm GPU caches, and exclude runtime initialization overhead.
-    \item \textbf{Timed runs} --- 30 kernel executions, each individually logged.
-    \item \textbf{Statistics} --- median $\pm$ IQR reported; outliers flagged at $>2\sigma$.
+    \item \textbf{Compiler backend failure:} suboptimal code generation (missed
+    loop unrolling, poor vectorisation). Diagnosed by inspecting generated
+    PTX (NVIDIA) or GCN (AMD) assembly side-by-side with the native baseline.
+    \item \textbf{Runtime coordination overhead:} extra synchronisation,
+    excessive dispatch frequency, or dispatch amplification in level-set
+    workloads.
+    \item \textbf{Memory model mismatch:} abstraction forces non-optimal memory
+    layout or access pattern (e.g., non-coalesced access due to column-major
+    storage).
+    \item \textbf{API limitation:} the abstraction's programming model cannot
+    express a required optimisation (e.g., scoped shared-memory allocation for
+    tiling).
 \end{enumerate}
 
-\textbf{We never report only the mean.} GPU kernels exhibit outliers from OS jitter
-and DVFS that inflate mean values. The median is the primary reported statistic.
+\noindent These four categories form the basis of the empirical taxonomy of
+eight failure and success patterns developed in Section~\ref{sec:taxonomy}.
 
-\subsection{Performance Portability Coefficient}
+\paragraph{Level~4 --- Roofline Characterisation.}
+For every configuration, we compute hardware utilisation:
 
-We use the PPC formulation of Pennycook et al.~\cite{Pennycook2019} (Equation~\ref{eq:ppc}).
-Efficiency is always relative to measured native performance, not theoretical peak.
-PPC $> 0.80$ denotes excellent portability; $0.60$--$0.80$ acceptable; $< 0.60$ poor.
+\begin{equation}
+    u = \frac{\text{Throughput}_\text{measured}}
+             {\min(P_\text{peak},\; \text{AI} \times B_\text{peak})}
+    \label{eq:roofline}
+\end{equation}
 
-\subsection{Roofline Normalization}
+\noindent where $P_\text{peak}$ is peak compute throughput, AI is arithmetic
+intensity, and $B_\text{peak}$ is peak memory bandwidth. A native utilisation
+gate is enforced: native implementations must achieve $u \geq 0.80$ on the
+large problem size before abstraction experiments begin. This verifies that we
+are measuring abstraction overhead, not hardware or software setup defects.
 
-For every configuration, we compute hardware utilization
-$u = \text{BW}_\text{measured} / \text{BW}_\text{peak}$.
-Native implementations must achieve $u \geq 0.80$ on the Large problem size
-before abstraction experiments begin. This verifies that the environment is
-correctly configured and that we are measuring abstraction overhead, not
-hardware or software setup defects.
+% -----------------------------------------------------------------------
+\subsection{Thermal Regime Characterisation}
+\label{subsec:thermal}
+% -----------------------------------------------------------------------
 
-\subsection{Deep Profiling}
+A critical methodological finding emerged during E1 that is absent from prior
+performance portability studies: the RTX~5060's consumer-class GDDR7 memory
+controller exhibits \emph{irreversible intra-session clock transitions} that
+constitute a first-class experimental confound.
 
-Any configuration where abstraction achieves $< 0.85 \times$ native performance
-is automatically flagged for deep profiling. For NVIDIA, we use
-Nsight Systems (\texttt{nsys}) for timeline analysis and Nsight Compute
-(\texttt{ncu}) for kernel-level counters. For AMD, \texttt{rocprof} and Omniperf.
-For Intel, VTune. PTX (NVIDIA) and GCN (AMD) generated code is inspected
-side-by-side with the native baseline.
+\subsubsection{E1 Discovery: Dynamic Memory Clock Transitions}
 
-\subsection{Overhead Attribution}
+Under sustained memory-bandwidth load, the RTX~5060 undergoes a one-way
+transition from a lower memory clock state ($\sim$9{,}001\,MHz, yielding
+$\sim$271\,GB/s) to a higher boost state ($\sim$12{,}001\,MHz, yielding
+$\sim$350\,GB/s). This transition is:
 
-TODO: describe the four-category attribution methodology.
+\begin{enumerate}
+    \item \textbf{Irreversible within a session:} once triggered, the GPU does
+    not return to the lower clock state until the driver session is fully reset.
+    \item \textbf{Triggered by sustained load:} approximately 40 consecutive
+    high-bandwidth iterations are required, regardless of GPU temperature.
+    \item \textbf{Abstraction-dependent in timing:} JIT-compiled abstractions
+    (Julia) delay the transition by 5--10 iterations relative to ahead-of-time
+    compiled frameworks, because JIT compilation latency reduces effective
+    memory pressure during early warmup.
+\end{enumerate}
 
-\subsection{Benchmarks and Implementations}
+\noindent If different abstractions are benchmarked without explicit clock
+control, they may be measured in different thermal regimes, producing spurious
+performance differences of up to $\sim$29\% ($350 / 271 \approx 1.29$) that are
+entirely attributable to hardware state rather than abstraction overhead.
 
-TODO: table of 7 kernels, sources, and available abstraction implementations.
+\subsubsection{E2 Discovery: Compute-Bound Thermal Contamination}
+
+E2 (DGEMM) revealed a second class of thermal confound: sustained FP64 load
+causes progressive SM frequency reduction, producing a monotonically decreasing
+throughput curve within a session. Fresh-state profiling of two flagged
+configurations revealed:
+
+\begin{itemize}
+    \item \texttt{raja\_naive}/medium: raw $\eta = 0.24$ $\rightarrow$
+    thermal-corrected $\eta = 0.66$ ($2.76\times$ thermal ratio). The residual
+    gap is a genuine API limitation (pattern P004), not thermal.
+    \item \texttt{julia\_naive}/medium: raw $\eta = 0.80$ $\rightarrow$
+    corrected $\eta \approx 1.0$. The sub-unity efficiency was entirely
+    thermal; Julia's layout advantage (pattern P005) is confirmed
+    size-independent.
+\end{itemize}
+
+\subsubsection{Control Mechanisms}
+
+\begin{itemize}
+    \item \textbf{Hardware state flag (\texttt{hw\_state\_verified}):} Each run
+    is tagged with a binary flag. Runs deviating $> 15\%$ from session median
+    are flagged as \texttt{0} and excluded from all statistics.
+    \item \textbf{SM clock locking:} \texttt{nvidia-smi --lock-gpu-clocks}
+    eliminates boost-clock variability in the compute domain.
+    \item \textbf{Adaptive warmup:} The CV$< 2\%$ protocol
+    (Section~\ref{subsubsec:warmup}) ensures thermal stability before timed
+    measurement begins.
+    \item \textbf{Same-session baselines:} Native and abstraction runs are
+    always measured in the same session under the same thermal conditions.
+\end{itemize}
+
+\noindent These thermal confounds are specific to the RTX~5060's GDDR7
+memory controller and dynamic power management. The MI300X (HBM3, fixed clocks)
+exhibits no such behaviour and requires no special thermal protocol.
+
+% -----------------------------------------------------------------------
+\subsection{Data Collection and Automation}
+\label{subsec:automation}
+% -----------------------------------------------------------------------
+
+All experiments are driven by a Python automation framework
+(\texttt{run\_experiments.py}) that iterates over the full experimental matrix.
+Per-kernel shell scripts handle binary discovery, warmup execution, timed
+measurement, and CSV output. The automation always executes native baselines
+first, then abstraction variants in a fixed order, with configurable cooldown
+periods between runs.
+
+Each timed run produces one row in a per-abstraction CSV file with the
+following schema: \texttt{timestamp}, \texttt{experiment\_id}, \texttt{kernel},
+\texttt{abstraction}, \texttt{platform}, \texttt{problem\_size},
+\texttt{run\_id}, \texttt{execution\_time\_ms}, \texttt{throughput},
+\texttt{hw\_state\_verified}. Raw CSVs are append-only and never edited
+post-collection. A validation script (\texttt{validate\_schema.py}) enforces
+required columns, enum constraints, positivity, and uniqueness before any
+analysis proceeds.
+
+PPC values, profiling queue flags, and roofline utilisation are computed
+post-hoc by dedicated analysis scripts (\texttt{compute\_ppc.py},
+\texttt{compute\_roofline.py}) that filter on
+\texttt{hw\_state\_verified = 1} before computing any statistics. The Git
+commit hash of the benchmark suite is recorded at run time; the complete
+experimental artifact will be released with a permanent DOI.

@@ -61,9 +61,7 @@ _EXPERIMENT_TO_KERNEL: dict[str, str] = {
 # Peak bandwidth (GB/s) from benchmarks/stream/config.yaml, used for roofline %
 _PEAK_BW_GBS: dict[str, float] = {
     "nvidia_rtx5060": 288.0,
-    "nvidia_a100":           2039.0,
-    "amd_mi250x":            3277.0,
-    "intel_pvc":             3276.0,
+    "amd_mi300x":    5300.0,
 }
 
 # ── Lazy config loader ─────────────────────────────────────────────────────────

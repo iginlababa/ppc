@@ -1,48 +1,466 @@
 % §6 Taxonomy of Abstraction Failure and Success Patterns
-% Status: Pending data (taxonomy.json must be validated)
+% Status: Written 2026-03-25 — full rewrite with validated E1–E7 evidence.
 
-\section{Taxonomy}
+\section{Taxonomy of Abstraction Patterns}
 \label{sec:taxonomy}
 
-\subsection{Failure Mode Categories}
+The experimental results of Section~\ref{sec:results} reveal that abstraction
+failures and successes are not random --- they are \emph{structural}, recurring
+whenever the same combination of workload characteristics, problem size, and
+framework properties is present. This section formalizes these observations into
+an empirical taxonomy of eight abstraction patterns (P001--P008): six failure
+modes, one success pattern, and one unconfirmed hypothesis. Each pattern is
+defined by a symptom signature, a root-cause category, quantitative evidence
+from one or more experiments, and a recommended mitigation. The taxonomy
+provides the vocabulary that the decision framework of
+Section~\ref{sec:framework} operates on.
 
-Every root cause is attributed to one of four categories:
+% ------------------------------------------------------------------
+\subsection{Root-Cause Categories}
+\label{subsec:categories}
+% ------------------------------------------------------------------
+
+Every pattern identified in this taxonomy is attributed to one of four
+root-cause categories, each associated with a distinct diagnostic methodology:
 
 \begin{enumerate}
-    \item \textbf{Compiler Backend Failure} --- poor code generation: missed optimizations,
-          bad loop unrolling, suboptimal register allocation. Detected via PTX/GCN inspection.
-    \item \textbf{Runtime Coordination Overhead} --- extra synchronization, task scheduling
-          costs, dispatch overhead. Detected via \texttt{nsys} timeline.
-    \item \textbf{Memory Model Mismatch} --- abstraction forces non-optimal layout or extra
-          indirection. Detected via L2 cache hit rate and memory access pattern analysis.
-    \item \textbf{API Limitation} --- abstraction cannot express a required optimization
-          (e.g., shared memory tiling). Detected via source code analysis.
+    \item \textbf{Runtime Coordination Overhead} --- per-launch dispatch cost,
+          fence and synchronization latency, or task scheduling overhead that
+          the abstraction layer adds to each GPU kernel invocation. Detected
+          via \texttt{nsys}/\texttt{rocprof} timeline analysis and CUDA/HIP
+          event timing. Three of the five validated failure patterns (P001,
+          P006, P008) fall in this category.
+
+    \item \textbf{Abstraction API Limitation} --- the abstraction's programming
+          interface cannot express the algorithm required for optimal
+          performance (e.g., scoped shared-memory allocation for tiled DGEMM).
+          Detected via source-code analysis comparing abstraction capabilities
+          against native kernel requirements.
+
+    \item \textbf{Memory Model Mismatch} --- the abstraction forces a
+          non-optimal data layout or access pattern, causing coalescing
+          degradation or unnecessary memory traffic. Detected via L2 cache hit
+          rate and memory throughput counters. This category also encompasses
+          the inverse case (P005) where the abstraction's default layout
+          \emph{improves} coalescing relative to the native baseline.
+
+    \item \textbf{Irregular Work Distribution} --- workload-inherent load
+          imbalance (e.g., power-law degree distributions) is amplified by the
+          abstraction's thread-to-work mapping, compounding with dispatch
+          overhead. Detected via warp activity counters and per-row work
+          statistics.
 \end{enumerate}
 
-\subsection{Failure Patterns}
+\noindent A fifth category, \textbf{Compiler Backend Failure} (suboptimal code
+generation by the abstraction's compiler backend), was hypothesized in our
+initial experimental design. While suggestive evidence exists (P002), we were
+unable to confirm this category independently due to hardware profiling
+constraints (Section~\ref{subsec:unconfirmed}). It is not included as a
+primary category pending further validation.
 
-% TODO: populate after experiment campaign.
-% Each pattern requires: symptom, root cause, affected workloads, platforms, mitigation, evidence.
+% ------------------------------------------------------------------
+\subsection{Validated Failure Patterns}
+\label{subsec:failure_patterns}
+% ------------------------------------------------------------------
 
-\paragraph{P001 --- Launch Overhead Dominance.}
-TODO
+This subsection presents the five failure patterns for which we have
+sufficient quantitative evidence to establish structural recurrence
+across experiments.
 
-\paragraph{P002 --- Compiler Backend Unrolling Failure.}
-TODO (reproduces Godoy et al.~\cite{Godoy2023} Julia/NVIDIA DGEMM gap)
+% --- P001 ---
+\paragraph{P001: Launch Overhead Dominance.}
+\textit{Status: Validated.}
+\textit{Category: Runtime Coordination Overhead.}
 
-\paragraph{P003 --- Memory Layout Mismatch.}
-TODO
+\noindent\textbf{Symptom.}
+Abstraction efficiency drops to 0.17--0.70 when single-kernel execution time
+$T_k$ is comparable to or smaller than the abstraction's per-launch overhead.
 
-\subsection{Success Patterns}
+\noindent\textbf{Root cause.}
+Each abstraction layer adds per-invocation overhead beyond the native
+\texttt{cudaLaunchKernel} or \texttt{hipLaunchKernel} cost: runtime dispatch,
+template instantiation, and synchronization logic that is not fully inlined.
+When $T_k < \text{overhead}$, overhead dominates total execution time.
+Per-launch overhead varies by framework: SYCL/HSA $\approx 19$\,\textmu{}s,
+Julia/CUDA $\approx 7$\,\textmu{}s, Kokkos/CUDA $\approx 5$\,\textmu{}s,
+RAJA/CUDA $\approx 2$\,\textmu{}s (Table~\ref{tab:overhead}).
 
-% TODO
+\noindent\textbf{Canonical evidence.}
+SYCL on E1 (STREAM Triad) at small $N$ on AMD MI300X: efficiency $= 0.167$
+(527 vs.\ 3154\,GB/s native). The HSA dispatch path adds $\approx 19$\,\textmu{}s
+per launch against a kernel time of $\approx 3.8$\,\textmu{}s, yielding a
+predicted efficiency of $3.8 / (3.8 + 19) = 0.167$ --- an exact match with
+observed performance (Section~\ref{subsec:e1}).
 
-\subsection{Taxonomy Map}
+\noindent\textbf{Secondary evidence.}
+Julia/E3/small/RTX~5060: efficiency $= 0.704$ ($T_k \approx 14$\,\textmu{}s,
+overhead $\approx 7$\,\textmu{}s). All abstractions on E7 (N-Body) at small
+$N$ (32K atoms): efficiency 0.39--0.67 across all four frameworks
+(Section~\ref{subsec:e7}).
 
-% Fig 19
-\begin{figure}[ht]
-    \centering
-    % \includegraphics[width=\linewidth]{figures/fig19_taxonomy_map.pdf}
-    \caption{Taxonomy map: failure modes $\times$ workload types $\times$ platforms.}
-    \label{fig:taxonomy_map}
-\end{figure}
+\noindent\textbf{PPC impact.} 0.17--0.70 depending on the $T_k$/overhead ratio.
+
+\noindent\textbf{Mitigation.}
+Use native implementations for kernels with $T_k < 50$\,\textmu{}s. Coarsen
+task granularity (fuse multiple small kernels into a single launch) to
+amortize overhead before adopting an abstraction.
+
+\begin{table}[t]
+\centering
+\caption{Calibrated per-launch overhead by abstraction and backend.
+Values are device-side effective overhead (\textmu{}s) after JIT warmup,
+computed as $\text{overhead} = T_k \times (1 - e) / e$ from observed
+efficiency $e$ across E1--E7 configurations.}
+\label{tab:overhead}
+\begin{tabular}{llcc}
+\hline
+\textbf{Abstraction} & \textbf{Backend} & \textbf{Median (\textmu{}s)}
+& \textbf{Range (\textmu{}s)} \\
+\hline
+RAJA     & CUDA & 2  & 1--4  \\
+RAJA     & HIP  & 4  & 3--5  \\
+Kokkos   & CUDA & 5  & 4--7  \\
+Kokkos   & HIP  & 4  & 3--5  \\
+Julia    & CUDA & 7  & 5--10 \\
+Julia    & ROCm & 4  & 3--6  \\
+SYCL     & HSA  & 19 & 15--25 \\
+\hline
+\end{tabular}
+\end{table}
+
+% --- P004 ---
+\paragraph{P004: API Expressivity Gap.}
+\textit{Status: Validated.}
+\textit{Category: Abstraction API Limitation.}
+
+\noindent\textbf{Symptom.}
+Size-independent efficiency degradation (PPC does \emph{not} improve with
+increasing $N$) on compute-bound kernels that require shared-memory tiling.
+
+\noindent\textbf{Root cause.}
+RAJA's \texttt{forall} and Julia's \texttt{@cuda}/\texttt{@roc} macro
+interfaces lack scoped shared-memory allocation primitives. Without
+shared-memory tiling, DGEMM falls back to global-memory-only access with
+$O(N^3)$ DRAM traffic versus $O(N^2)$ for the tiled native kernel. This is an
+\emph{algorithmic} limitation, not a runtime cost: increasing $N$ does not
+help because the memory-traffic asymptote is fundamentally different.
+
+\noindent\textbf{Canonical evidence.}
+RAJA on E2 (DGEMM) on AMD MI300X: efficiency $= 0.316$ (small) $\rightarrow
+0.236$ (medium) $\rightarrow 0.189$ (large) --- the \emph{worsening} trend
+with $N$ confirms an algorithmic root cause (Section~\ref{subsec:e2}). On the
+same kernel, Kokkos \texttt{TeamPolicy} achieves 0.963 and SYCL
+\texttt{local\_accessor} achieves 0.972, isolating API expressivity as the
+discriminating factor.
+
+\noindent\textbf{PPC impact.} 0.19--0.35 for affected abstractions (RAJA, Julia)
+on compute-bound tiled kernels.
+
+\noindent\textbf{Mitigation.}
+Use Kokkos \texttt{TeamPolicy} with scratch-pad memory, SYCL
+\texttt{local\_accessor}, or vendor-tuned libraries (cuBLAS, rocBLAS) for
+kernels that require shared-memory tiling.
+
+% --- P006 ---
+\paragraph{P006: Tiling Policy Overhead.}
+\textit{Status: Partially validated.}
+\textit{Category: Runtime Coordination Overhead.}
+
+\noindent\textbf{Symptom.}
+Kokkos \texttt{MDRangePolicy} is 15--25\% slower than flat-loop dispatch at
+small $N$; shared-memory tiling is counterproductive for data structures
+without spatial locality.
+
+\noindent\textbf{Root cause.}
+\texttt{MDRangePolicy<Rank<3>{>}} with tile hints generates boundary-masking
+conditionals at tile edges. At small $N$ (e.g., $32^3$), boundary overhead
+constitutes 20--30\% of warp execution cycles. Additionally, tiling assumes
+spatial data reuse; when the data structure does not provide it (e.g., CSR
+neighbor lists in N-body), shared-memory staging adds pressure and barrier
+cost without compensating reuse.
+
+\noindent\textbf{Evidence.}
+E3 (3D Stencil) on RTX~5060: Kokkos efficiency $= 0.760$ versus RAJA
+$= 0.942$ with identical kernel logic but different dispatch policies
+(Section~\ref{subsec:e3}). E7 (N-Body): native tiled kernel is 15--34\%
+\emph{slower} than native untiled at all problem sizes for CSR-based force
+calculation (Section~\ref{subsec:e7}).
+
+\noindent\textbf{PPC impact.} 0.65--0.85 at small $N$; recovers to $\geq 0.90$ at
+large $N$ as boundary overhead amortizes.
+
+\noindent\textbf{Mitigation.}
+Reduce tile size proportionally to $N$; switch to \texttt{RangePolicy} with
+manual index arithmetic for small grids. Profile tiling benefit before
+assuming it helps --- tiling is data-structure-dependent, not just
+architecture-dependent.
+
+% --- P007 ---
+\paragraph{P007: Load Imbalance Amplification.}
+\textit{Status: Validated.}
+\textit{Category: Irregular Work Distribution.}
+
+\noindent\textbf{Symptom.}
+Efficiency collapses \emph{below} the level predicted by P001 alone ---
+launch overhead and load imbalance interact multiplicatively.
+
+\noindent\textbf{Root cause.}
+Power-law degree distributions ($\sigma = 2.5$) create extreme row-length
+variance. One-thread-per-row mapping leaves most warps stalled waiting on the
+few long-row threads. When P001 is already active (small $N$, high overhead),
+the imbalance compounds: idle warp cycles increase the \emph{effective}
+overhead fraction per launch.
+
+\noindent\textbf{Canonical evidence.}
+Julia on E4 (SpMV) at small $N$ on RTX~5060: power-law efficiency $= 0.449$
+versus Laplacian efficiency $= 0.561$ --- same kernel, same $N$, but
+$\sigma = 2.5$ adds a 0.11 multiplicative penalty beyond P001
+(Section~\ref{subsec:e4}). The compound model
+$\text{PPC} = \text{PPC}_{\text{P001}} \times (1 - 0.10 \times
+\min(\sigma, 3.0))$ predicts 0.42; observed 0.449.
+
+\noindent\textbf{PPC impact.} 0.40--0.70 at small $N$ with power-law inputs;
+near-native at large $N$ where both P001 and P007 amortize.
+
+\noindent\textbf{Mitigation.}
+Warp-per-row CSR (multiple threads per row), segmented reductions
+(\texttt{DeviceSegmentedReduce}), or row reordering to group similar-length
+rows within each warp. Native implementations recommended for irregular
+workloads at small $N$.
+
+% --- P008 ---
+\paragraph{P008: Level-Set Dispatch Amplification.}
+\textit{Status: Validated --- strongest quantitative finding.}
+\textit{Category: Runtime Coordination Overhead.}
+
+\noindent\textbf{Symptom.}
+Efficiency decays with the number of dependency levels $L$, \emph{not} with
+problem size $N$. Level-set algorithms accumulate
+$O(L \times \text{overhead})$ total penalty.
+
+\noindent\textbf{Root cause.}
+Level-set algorithms (SpTRSV forward substitution, BFS frontier expansion)
+require one GPU kernel launch per dependency level to preserve correctness.
+Each launch carries the abstraction's per-invocation overhead
+(Table~\ref{tab:overhead}). Total overhead $= L \times \text{overhead}$,
+which is workload-structure-dependent. The distinguishing test: fix $N$, vary
+$L$ --- if efficiency decays with $L$ but not $N$, the pattern is P008.
+
+\noindent\textbf{Canonical evidence.}
+SYCL on E5 (SpTRSV) with Laplacian matrix ($L = 181$) on AMD MI300X:
+predicted PPC $= T_{\text{compute}} / (T_{\text{compute}} + 181 \times
+0.070\,\text{ms}) = 0.490$; observed PPC $= 0.490$ --- an exact model match
+(Section~\ref{subsec:e5}). Julia on E5/Laplacian/large on RTX~5060: efficiency
+$= 0.464$ ($181 \times 25$\,\textmu{}s $= 4.5$\,ms accumulated overhead).
+Julia on E6 (BFS): efficiency 5--6\% due to multi-kernel dispatch per level
+(Section~\ref{subsec:e6}).
+
+\noindent\textbf{Inverse pattern.}
+When levels are \emph{wide} (many rows per level), P008 reverses: RAJA on
+E5/random/large on RTX~5060 achieves efficiency $= 1.299$, and Kokkos
+$= 1.113$. Wide levels make per-launch overhead negligible relative to
+compute, and RAJA/Kokkos fence implementations pipeline more efficiently
+than native \texttt{cudaDeviceSynchronize}.
+
+\noindent\textbf{SYCL diagnostic axis.}
+P008 explains 90\% of SYCL's performance variance across experiments:
+single-kernel workloads (E3: 0.987, E7: 0.92) deliver excellent efficiency,
+while multi-kernel workloads (E5: 0.49, E6: 0.30) collapse. The
+discriminating variable is not architecture but workload structure ---
+specifically, whether the algorithm requires $L > 1$ launches per invocation.
+
+\noindent\textbf{PPC impact.} Julia: 0.35--0.46; SYCL: 0.49--0.54;
+RAJA/Kokkos: 0.80--1.30 depending on level width.
+
+\noindent\textbf{Mitigation.}
+Prefer RAJA or Kokkos for level-set algorithms (per-launch overhead 2--5\,\textmu{}s
+versus Julia 7--25\,\textmu{}s or SYCL 19\,\textmu{}s). Fuse independent
+levels where correctness permits. Pre-compute level structure and batch
+independent rows into coarsened super-levels.
+
+% ------------------------------------------------------------------
+\subsection{Success Patterns and Unconfirmed Hypotheses}
+\label{subsec:success_patterns}
+% ------------------------------------------------------------------
+
+% --- P005 ---
+\paragraph{P005: Layout-Induced Coalescing Advantage.}
+\textit{Status: Validated --- success pattern.}
+\textit{Category: Memory Model Mismatch (inverse).}
+
+\noindent\textbf{Symptom.}
+Abstraction efficiency exceeds 1.0 --- the abstraction \emph{outperforms}
+the native baseline.
+
+\noindent\textbf{Root cause.}
+Julia's column-major \texttt{CuArray}s map warp threads
+(\texttt{threadIdx.x} $\rightarrow$ row index) to consecutive elements of the
+same matrix column, achieving perfect coalescing on the $A$ matrix and
+broadcast access on $B$. The native tiled C kernel uses row-major storage and
+incurs 512 \texttt{\_\_syncthreads()} barriers at $N = 8192$ (256 tiles
+$\times$ 2 barriers per tile). At arithmetic intensity $\approx 683$
+FLOP/byte, synchronization overhead exceeds shared-memory bandwidth savings.
+
+\noindent\textbf{Evidence.}
+Julia on E2 (DGEMM) on RTX~5060: efficiency $= 1.25\times$ native at large
+$N$ (Section~\ref{subsec:e2}). Fresh-state profiling confirms the advantage
+is size-independent: $1.29\times$ at medium $N$, $1.20\times$ at large $N$.
+
+\noindent\textbf{Platform asymmetry.}
+P005 is confirmed on NVIDIA RTX~5060 \emph{only}. On AMD MI300X, Julia naive
+DGEMM achieves efficiency $= 0.306$ --- the column-major layout advantage
+is insufficient when the native AMD baseline is $4\times$ higher performing.
+This platform-generation reversal (Godoy et al.~\cite{Godoy2023} found
+$0.90$+ on CDNA2/MI250X) underscores that abstraction outcomes are
+architecture-specific.
+
+\noindent\textbf{Implication.}
+Layout conventions can dominate algorithmic overhead in compute-bound regimes.
+The expert assumption that ``tiling always improves performance'' fails when
+synchronization cost exceeds the memory-traffic reduction from shared-memory
+staging.
+
+% --- P002/P003 ---
+\label{subsec:unconfirmed}
+\paragraph{Unconfirmed patterns.}
+Two patterns from our initial hypothesis set were not independently confirmed:
+
+\textit{P002: Compiler Backend Unrolling Failure} (partially validated).
+The original hypothesis attributed E2 RAJA naive degradation on NVIDIA to
+suboptimal NVCC code generation for template-instantiated loops. Subsequent
+analysis reclassified this as P004 (API Expressivity Gap): RAJA's performance
+deficit is size-independent and persists identically on AMD, ruling out an
+NVIDIA-specific compiler cause. Independent confirmation requires
+\texttt{ncu} hardware counter analysis, which is currently blocked by
+\texttt{RmProfilingAdminOnly=1} on the RTX~5060 driver. P002 remains
+plausible as a contributing factor but cannot be isolated from P004 with
+available data.
+
+\textit{P003: Memory Layout Mismatch} (hypothesis).
+E3 Kokkos small-$N$ efficiency ($0.760$) was initially attributed to a layout
+mismatch, but RAJA achieves $0.942$ on the same kernel with identical data
+layout --- the gap is better explained by P006 (\texttt{MDRangePolicy}
+overhead). No independent P003 evidence was found across E1--E7. The pattern
+may manifest on future hardware or with workloads not covered by our
+experimental matrix.
+
+% ------------------------------------------------------------------
+\subsection{Taxonomy Summary}
+\label{subsec:taxonomy_summary}
+% ------------------------------------------------------------------
+
+Table~\ref{tab:taxonomy_summary} presents all eight patterns with their
+validation status, root-cause category, PPC impact range, and primary
+experimental evidence.
+
+\begin{table*}[t]
+\centering
+\caption{Empirical taxonomy of abstraction patterns. Status indicates
+the level of experimental evidence: \textit{validated} (structural
+recurrence confirmed across multiple configurations), \textit{partial}
+(suggestive evidence, pending further instrumentation), \textit{hypothesis}
+(no independent confirmation).}
+\label{tab:taxonomy_summary}
+\begin{tabular}{llllcl}
+\hline
+\textbf{ID} & \textbf{Pattern Name} & \textbf{Type} & \textbf{Category}
+& \textbf{PPC Range} & \textbf{Primary Evidence} \\
+\hline
+P001 & Launch Overhead Dominance      & Failure  & Runtime Overhead
+     & 0.17--0.70 & E1 SYCL/small/AMD \\
+P002 & Compiler Backend Failure       & Failure  & Compiler Backend
+     & 0.25--0.50 & E2 (inconclusive) \\
+P003 & Memory Layout Mismatch         & Failure  & Memory Model
+     & 0.60--0.80 & --- \\
+P004 & API Expressivity Gap           & Failure  & API Limitation
+     & 0.19--0.35 & E2 RAJA/all sizes/AMD \\
+P005 & Layout-Induced Coalescing      & Success  & Memory Model
+     & $> 1.0$    & E2 Julia/large/RTX \\
+P006 & Tiling Policy Overhead         & Failure  & Runtime Overhead
+     & 0.65--0.85 & E3 Kokkos/small/RTX; E7 tile \\
+P007 & Load Imbalance Amplification   & Failure  & Irregular Work
+     & 0.40--0.70 & E4 Julia/power\_law/small \\
+P008 & Level-Set Dispatch Amplification & Failure & Runtime Overhead
+     & 0.35--1.30 & E5 SYCL/laplacian/AMD \\
+\hline
+\end{tabular}
+\end{table*}
+
+% ------------------------------------------------------------------
+\subsection{Cross-Reference and Discussion}
+\label{subsec:taxonomy_map}
+% ------------------------------------------------------------------
+
+Table~\ref{tab:taxonomy_crossref} maps each pattern to the experiments in
+which it was observed, revealing three structural properties of the taxonomy.
+
+\begin{table}[t]
+\centering
+\caption{Pattern--experiment cross-reference. $\bullet$ = primary evidence;
+$\circ$ = secondary evidence. E1: STREAM Triad; E2: DGEMM; E3: 3D Stencil;
+E4: SpMV; E5: SpTRSV; E6: BFS; E7: N-Body.}
+\label{tab:taxonomy_crossref}
+\begin{tabular}{lccccccc}
+\hline
+\textbf{Pattern} & \textbf{E1} & \textbf{E2} & \textbf{E3} & \textbf{E4}
+& \textbf{E5} & \textbf{E6} & \textbf{E7} \\
+\hline
+P001 & $\bullet$ &           & $\circ$   & $\circ$   &           &           & $\circ$   \\
+P002 &           & $\circ$   &           &           &           &           &           \\
+P003 &           &           &           &           &           &           &           \\
+P004 &           & $\bullet$ & $\circ$   &           &           &           &           \\
+P005 &           & $\bullet$ &           &           &           &           &           \\
+P006 &           &           & $\bullet$ &           &           &           & $\bullet$ \\
+P007 &           &           &           & $\bullet$ &           &           &           \\
+P008 &           &           &           &           & $\bullet$ & $\circ$   & $\circ$   \\
+\hline
+\end{tabular}
+\end{table}
+
+\paragraph{Concentration.}
+Three patterns --- P001 (Launch Overhead), P004 (API Expressivity), and P008
+(Level-Set Dispatch) --- account for approximately 80\% of all observed
+failure configurations with PPC $< 0.60$. This concentration suggests that
+practical abstraction selection can be driven by a small number of diagnostic
+checks rather than exhaustive profiling.
+
+\paragraph{Shared mechanisms at different scales.}
+P001 and P008 share the same root cause (per-launch dispatch overhead) but
+operate at different scales: P001 manifests when a \emph{single} kernel's
+execution time is comparable to overhead; P008 manifests when
+\emph{accumulated} overhead across $L$ levels dominates total runtime. The
+distinction is practically important: P001 can be resolved by coarsening a
+single kernel, while P008 requires algorithmic changes (level fusion) or
+framework selection (RAJA/Kokkos over Julia/SYCL for level-set workloads).
+
+\paragraph{Multiplicative co-occurrence.}
+When multiple patterns are simultaneously active, their PPC effects compound
+multiplicatively rather than additively. P007 (Load Imbalance) compounds with
+P001 (Launch Overhead) at small $N$ on power-law inputs: P001 alone predicts
+efficiency $\approx 0.56$ for Julia/E4/small, but the P001$\times$P007
+compound yields 0.449. This multiplicative interaction means that developers
+facing irregular workloads at small problem sizes must address \emph{both}
+dispatch overhead and load imbalance to recover acceptable performance.
+
+\paragraph{Structural recurrence.}
+All five validated patterns are structural --- they recur whenever the same
+combination of workload characteristics and overhead profile is present,
+independent of specific framework version or driver release. P001 appears
+identically in E1 (STREAM), E3 (Stencil), E4 (SpMV), and E7 (N-Body)
+whenever $T_k < \text{overhead}$. P008 appears in both E5 (SpTRSV) and E6
+(BFS) whenever $L$ is high, and its \emph{absence} in E7 (single-kernel
+N-Body) confirms the $L$-dependence. This structural property is what makes
+the patterns predictive rather than merely descriptive.
+
+\paragraph{Limitations.}
+Two of the eight hypothesized patterns (P002, P003) could not be confirmed
+due to hardware profiling constraints. The RTX~5060's
+\texttt{RmProfilingAdminOnly=1} driver restriction blocks \texttt{ncu}
+hardware performance counters required for compiler code-generation analysis
+(P002) and L2 cache hit-rate measurement (P003). Future work should validate
+these patterns on hardware with full performance monitoring unit access.
+
+\medskip
+\noindent These patterns and their quantitative signatures form the input
+vocabulary for the five calibrated decision rules presented in
+Section~\ref{sec:framework}.

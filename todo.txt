@@ -76,3 +76,148 @@ E1
                                                                                                                                                        
   When you run the multi-platform PPC computation (harmonic mean across both platforms), Kokkos will clearly top the chart, SYCL second, Julia third,  
   and RAJA last — that's the core E1 finding.  
+
+  claude --resume "update-introduction-gpu-focus"
+
+
+
+  Yes, H100 SXM is a great match. Both are HPC-class, HBM3, datacenter GPUs — this is the most common cross-vendor HPC comparison in the literature right now.                         
+                                                                                                                                                                                       
+  Here's the full scope of changes needed to add H100 SXM as a third platform:                                                                                                         
+                                                                                                                                                                                       
+  ---                                                                                                                                                                                  
+  Infrastructure Changes (before running experiments)                                                                                                                                  
+                                                                                                                                                                                       
+  Config files (benchmarks/*/config.yaml) — 7 files
+                                                                                                                                                                                       
+  Add nvidia_h100_sxm to platform lists + peak bandwidth/FLOPS values:                                                                                                                 
+  - Peak BW: ~3350 GB/s (measured; 3350 is conservative)                                                                                                                               
+  - Peak FP64: ~67 TFLOP/s                                                                                                                                                             
+  - Compute capability: 9.0 (Hopper)                    
+  - Kokkos arch: HOPPER90 (already mapped in build scripts)                                                                                                                            
+                                                                                                                                                                                       
+  Analysis scripts — 4 files                                                                                                                                                           
+                                                                                                                                                                                       
+  ┌────────────────────────────────┬───────────────────────────────────────────┐                                                                                                       
+  │              File              │                What to add                │
+  ├────────────────────────────────┼───────────────────────────────────────────┤                                                                                                       
+  │ analysis/compute_ppc.py        │ nvidia_h100_sxm: 3350.0 in _PEAK_BW_GBS   │
+  ├────────────────────────────────┼───────────────────────────────────────────┤
+  │ analysis/compute_roofline.py   │ BW + FLOPS entries for H100               │                                                                                                       
+  ├────────────────────────────────┼───────────────────────────────────────────┤                                                                                                       
+  │ analysis/generate_plots.py     │ Marker symbol for H100                    │                                                                                                       
+  ├────────────────────────────────┼───────────────────────────────────────────┤                                                                                                       
+  │ analysis/decision_framework.py │ Platform suffix mapping + default targets │
+  └────────────────────────────────┴───────────────────────────────────────────┘                                                                                                       
+                                                        
+  Build/run scripts — no changes needed                                                                                                                                                
+                                                        
+  The scripts already handle any nvidia_* platform generically. Just pass --platform nvidia_h100_sxm --cuda-arch 90.                                                                   
+   
+  Results directories — auto-created by run scripts                                                                                                                                    
+                                                        
+  ---                                                                                                                                                                                  
+  Paper Changes (after collecting data)                 
+                                                                                                                                                                                       
+  Text references that assume exactly 2 platforms:
+                                                                                                                                                                                       
+  ┌──────────────────────────┬──────────────┬───────────────────────────────┬─────────────────────────────┐                                                                            
+  │           File           │   Line(s)    │         Current text          │          Update to          │                                                                            
+  ├──────────────────────────┼──────────────┼───────────────────────────────┼─────────────────────────────┤                                                                            
+  │ introduction.tex         │ 61           │ "two GPU architectures"       │ "three GPU architectures"   │
+  ├──────────────────────────┼──────────────┼───────────────────────────────┼─────────────────────────────┤
+  │ section2_background.tex  │ 211          │ "These two architectures"     │ "These three architectures" │                                                                            
+  ├──────────────────────────┼──────────────┼───────────────────────────────┼─────────────────────────────┤                                                                            
+  │ section4_methodology.tex │ 40           │ "Architectures (2)"           │ "Architectures (3)"         │                                                                            
+  ├──────────────────────────┼──────────────┼───────────────────────────────┼─────────────────────────────┤                                                                            
+  │ section4_methodology.tex │ 67           │ "The two platforms differ"    │ rewrite for three           │
+  ├──────────────────────────┼──────────────┼───────────────────────────────┼─────────────────────────────┤                                                                            
+  │ section5_experiments.tex │ 28, 122, 195 │ "both platforms"              │ "all three platforms"       │
+  ├──────────────────────────┼──────────────┼───────────────────────────────┼─────────────────────────────┤                                                                            
+  │ section9_conclusion.tex  │ 102          │ "Two hardware platforms"      │ "Three hardware platforms"  │
+  ├──────────────────────────┼──────────────┼───────────────────────────────┼─────────────────────────────┤                                                                            
+  │ section9_conclusion.tex  │ 104          │ lists H100 as "not evaluated" │ remove from exclusion       │
+  └──────────────────────────┴──────────────┴───────────────────────────────┴─────────────────────────────┘                                                                            
+                                                        
+  Hardware table (section2_background.tex) — add H100 row:                                                                                                                             
+                                                        
+  NVIDIA & H100 SXM & Hopper (GH100) & 80 GB HBM3 & 3350 GB/s & CUDA & HPC                                                                                                             
+                                                                                                                                                                                       
+  Taxonomy data (data/taxonomy.json)
+                                                                                                                                                                                       
+  - All phi values currently use 2-platform harmonic mean — will need recalculation with 3 platforms                                                                                   
+  - Add H100 efficiency records to all experiment entries
+                                                                                                                                                                                       
+  ---                                                   
+  Experiment Execution (the actual work)
+                                                                                                                                                                                       
+  For each of E1–E7 on H100 SXM:
+  1. Build: ./scripts/build/build_<kernel>.sh --platform nvidia_h100_sxm --cuda-arch 90                                                                                                
+  2. Run native baseline first, verify it hits >80% peak                                                                                                                               
+  3. Run all abstractions: native, Kokkos, RAJA, SYCL, Julia (and Numba — it works on Hopper unlike Blackwell)                                                                         
+  4. Standard warmup: 10 iterations (HBM, no dynamic clock issue)                                                                                                                      
+  5. Profile any abstraction below 0.85x native                                                                                                                                        
+                                                                                                                                                                                       
+  Bonus: Numba works on H100 (compute capability 9.0), so you gain an extra abstraction that was excluded on RTX 5060.                                                                 
+                                                                                                                                                                                       
+  ---                                                                                                                                                                                  
+  Key Decision Point                                                                                                                                                                   
+                                                        
+  The phi (cross-platform PPC) values change meaning with 3 platforms. You have two options:
+                                                                                                                                                                                       
+  Option A: Compute phi across all 3 NVIDIA+AMD platforms — strongest claim but RTX 5060 consumer-class drags it down for some patterns                                                
+                                                                                                                                                                                       
+  Option B: Report phi for the "HPC pair" (H100 + MI300X) as the primary metric, and show RTX 5060 results separately as a "consumer GPU portability" supplement                       
+                                                        
+  Option B might be stronger for the paper — your primary claims rest on HPC-class hardware, and the RTX 5060 data becomes bonus evidence showing the taxonomy generalizes to consumer 
+  hardware.                                             
+                                                                                                                                                                                       
+  Which approach do you prefer? That affects how we restructure the analysis and paper sections.   
+
+__________________________________________________________________________________________________________
+● Good question. The RTX 5060 still has real value — you just need to reframe its role. Here's how I'd think about it:                                                                 
+                                                                                                                                                                                     
+  Primary HPC pair: H100 SXM + MI300X — these carry your core claims, phi values, and taxonomy validation                                                                              
+   
+  RTX 5060's new role: "Generalizability validation" — it answers a different question: do the taxonomy patterns hold across GPU classes, not just HPC hardware?                       
+                                                                                                                                                                                     
+  This is actually a stronger paper structure than what you had before:                                                                                                                
+                                                        
+  What RTX 5060 contributes (don't lose any of this):                                                                                                                                  
+                                                        
+  1. GDDR7 thermal protocol (Section 4.4) — This is a standalone methodological contribution. Consumer GDDR7 GPUs are increasingly used in research labs and edge HPC. Documenting the 
+  dynamic clock transition and the 50-iteration warmup requirement is genuinely useful to the community. Keep this section as-is.
+  2. P005 (Julia layout advantage) — First discovered on RTX 5060 at 1.25x native. With H100 data, you can now show whether this pattern is Blackwell-specific or generalizes to       
+  Hopper. Either result is interesting.                                                                                                                                                
+  3. Three-tier generalizability — Your taxonomy was derived from HPC hardware (H100 + MI300X) and then validated on consumer hardware (RTX 5060) without modification. That's a much
+  stronger claim than "we tested on two platforms."                                                                                                                                    
+                                                        
+  Suggested table revision:                                                                                                                                                            
+                                                        
+  \begin{tabular}{lllllll}
+  \hline                                                                                                                                                                               
+  \textbf{Vendor} & \textbf{GPU} & \textbf{Arch} & \textbf{Memory}
+  & \textbf{Peak BW} & \textbf{Native} & \textbf{Role} \\                                                                                                                              
+  \hline                                                                                                                                                                               
+  NVIDIA & H100 SXM  & Hopper (GH100) & 80\,GB HBM3  & 3350\,GB/s & CUDA & Primary HPC \\                                                                                              
+  AMD    & MI300X    & CDNA3          & 192\,GB HBM3 & 5300\,GB/s & HIP  & Primary HPC \\                                                                                              
+  NVIDIA & RTX 5060  & Blackwell (GB107) & 8\,GB GDDR7 & 288\,GB/s & CUDA & Generalizability \\                                                                                        
+  \hline                                                                                                                                                                               
+  \end{tabular}                                                                                                                                                                        
+                                                                                                                                                                                       
+  How the paper narrative changes:                                                                                                                                                     
+   
+  - Phi (cross-platform PPC): Computed over H100 + MI300X only (the HPC pair)                                                                                                          
+  - RTX 5060 efficiency: Reported separately, framed as "the taxonomy patterns P001–P008 derived from the HPC pair also predict behavior on consumer hardware"
+  - Section 4.4 (thermal protocol): Stays. Add one sentence: "This protocol is specific to GDDR7 platforms; the H100 SXM and MI300X use HBM3 with fixed clocks and require only the    
+  standard 10-iteration warmup."                                                                                                                                                       
+  - Section 9 (limitations): Changes from "two platforms" to "three platforms spanning two GPU classes (HPC and consumer)"                                                             
+                                                                                                                                                                                       
+  The RTX 5060 is still comparable — just differently                                                                                                                                  
+                                                                                                                                                                                       
+  You're not throwing away data. You're promoting it from "one of two co-equal platforms" to "independent validation across a different GPU class." That's a better story for          
+  reviewers.                                            
+                                                                                                                                                                                       
+  Want me to write up the full plan for all the changes — infrastructure, paper text, and analysis — so you can track what needs doing?  
+
+  claude --resume "justify-hardware-selection"  

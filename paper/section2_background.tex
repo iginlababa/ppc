@@ -1,44 +1,303 @@
 % §2 Background
-% Status: Written (stub)
+% Status: Revised 2026-03-22 — full rewrite aligned with E1–E7 results.
 
 \section{Background}
 \label{sec:background}
 
-\subsection{Performance Portability}
+This section establishes the conceptual and technical vocabulary required to
+interpret the methodology and results presented in this paper. We define the
+performance portability metric that underpins all quantitative claims
+(Section~\ref{subsec:ppc}), characterize the four abstraction layers evaluated
+and their relevant properties (Section~\ref{subsec:abstraction}), describe the
+target hardware architectures in terms of properties that make cross-architecture
+evaluation non-trivial (Section~\ref{subsec:hardware}), and introduce
+\emph{selective abstraction} as the organizing concept of this work
+(Section~\ref{subsec:selective}).
 
-Performance portability (PP) quantifies how well a single codebase performs across
-different hardware platforms. Following~\cite{Pennycook2019}, we use the
-Performance Portability Coefficient (PPC):
+% ------------------------------------------------------------------
+\subsection{Performance Portability: Definition and Metrics}
+\label{subsec:ppc}
+% ------------------------------------------------------------------
+
+Performance portability quantifies how consistently an application or
+programming model delivers computational efficiency across a set of target
+hardware platforms. Following Pennycook et al.~\cite{Pennycook2019}, we adopt
+the \emph{Performance Portability Coefficient} (PPC) as the primary
+quantitative metric throughout this paper. For a given application $a$,
+problem $p$, and set of platforms $H$, the PPC is defined as:
 
 \begin{equation}
-\label{eq:ppc}
-\text{PPC}(a, p) = \frac{|H|}{\sum_{h \in H} \frac{1}{e_h(a, p)}}
+    \text{PPC}(a, p, H) =
+    \begin{cases}
+        \dfrac{|H|}{\displaystyle\sum_{i \in H} \frac{1}{e_i(a,p)}}
+        & \text{if } e_i(a,p) > 0 \; \forall \, i \in H \\[10pt]
+        0 & \text{otherwise}
+    \end{cases}
+    \label{eq:ppc}
 \end{equation}
 
-where $H$ is the set of platforms with working implementations, and $e_h(a, p)$
-is the efficiency of abstraction $a$ on problem $p$ relative to the native baseline
-on platform $h$.
+\noindent where $e_i(a, p)$ is the \emph{performance efficiency} of
+application $a$ solving problem $p$ on platform $i$, defined as the ratio
+of achieved performance to the best-known performance on that platform ---
+in this study, the native baseline:
 
-\subsection{GPU Abstraction Layers}
+\begin{equation}
+    e_i(a, p) = \frac{\text{Performance}_i(a, p)}{\text{NativeBaseline}_i(p)}
+    \label{eq:efficiency}
+\end{equation}
+
+The PPC is the harmonic mean of per-platform efficiencies. The harmonic mean
+is deliberately chosen over the arithmetic mean: a single platform on which
+an abstraction performs poorly will strongly suppress the overall PPC,
+reflecting the practical reality that a portability claim is only as strong
+as its weakest platform.
+
+\paragraph{Single-platform note.}
+When data covers only one platform, $|H| = 1$ and PPC$(a, p, H) = e_i(a, p)$
+by definition. This is numerically correct but does not capture portability
+across platforms. In this paper, SYCL data is unavailable on NVIDIA RTX~5060
+for most kernels (Section~\ref{subsec:hardware}); SYCL efficiency values
+are therefore single-platform and should be interpreted as AMD-only efficiency,
+not cross-platform portability scores.
+
+\paragraph{Interpretation thresholds.}
+We adopt the following thresholds throughout this paper, consistent with
+community practice~\cite{Pennycook2019}:
+
+\begin{itemize}
+    \item $\text{PPC} \geq 0.80$: \textbf{Excellent portability} --- abstraction
+    delivers near-native performance across all platforms.
+    \item $0.60 \leq \text{PPC} < 0.80$: \textbf{Acceptable portability} ---
+    platform-specific tuning may be required but the abstraction is viable.
+    \item $\text{PPC} < 0.60$: \textbf{Poor portability} --- the abstraction
+    is failing on at least one platform; native or hybrid implementation
+    should be considered.
+\end{itemize}
+
+A secondary diagnostic threshold used in this paper is the \emph{deep-profiling
+trigger}: configurations where abstraction efficiency falls below
+$0.85 \times \text{native}$ are flagged for root-cause analysis
+(Section~\ref{sec:methodology}).
+
+\paragraph{What PPC does not capture.}
+The PPC is a necessary but not sufficient measure of abstraction value. It
+does not capture: (i) absolute performance --- a framework achieving 50\% of
+native on all platforms has PPC~$= 1.0$ but is uniformly slow; (ii) the
+overhead \emph{structure} that explains why a given PPC is achieved; or
+(iii) the dependence of efficiency on problem size, which can reverse the
+ranking of abstractions across problem scales. This paper addresses all
+three limitations through its four-level measurement hierarchy
+(Section~\ref{sec:methodology}).
+
+% ------------------------------------------------------------------
+\subsection{Abstraction Layers: An Operational Definition}
+\label{subsec:abstraction}
+% ------------------------------------------------------------------
+
+In this paper, \emph{abstraction} refers to a software layer that hides
+hardware-specific implementation details behind a portable, higher-level
+programming interface, allowing the same source code to target multiple GPU
+architectures without modification. This is a deliberately narrow, operational
+definition --- not abstraction in the general computer-science sense of
+encapsulation or information hiding, but a concrete engineering choice about
+where in the software stack hardware-specific decisions are made.
+
+Every abstraction layer mediates three concerns:
+
+\begin{enumerate}
+    \item \textbf{Execution target}: the developer expresses a parallel
+    pattern (e.g., \texttt{parallel\_for}, a reduction); the framework
+    generates the appropriate CUDA kernel, HIP kernel, or thread pool
+    depending on the backend.
+
+    \item \textbf{Memory model}: the developer declares a data structure
+    (e.g., a Kokkos \texttt{View} or a Julia \texttt{CuArray}); the
+    framework handles placement and movement across host and device
+    memory spaces.
+
+    \item \textbf{Execution model}: the developer expresses algorithmic
+    intent; the framework maps this to the target architecture's
+    concurrency model --- NVIDIA warps, AMD wavefronts --- at compile time.
+\end{enumerate}
+
+\paragraph{The abstraction spectrum.}
+The frameworks evaluated in this paper span a spectrum from zero abstraction
+to full language-level abstraction:
+
+\begin{figure}[h]
+\centering
+\begin{tabular}{ccccc}
+\hline
+\textbf{Native} & \textbf{RAJA} & \textbf{Kokkos} & \textbf{SYCL} &
+\textbf{Julia} \\
+CUDA / HIP & Loop-level & Data + Exec & Standard API & Language runtime \\
+Max control & $\longleftarrow$ & & $\longrightarrow$ & Max portability \\
+\hline
+\end{tabular}
+\caption{The abstraction spectrum evaluated in this paper.}
+\label{fig:abstraction_spectrum}
+\end{figure}
 
 \paragraph{Kokkos~\cite{Carter2014}.}
-Data structure abstraction built on portable Views and Execution Spaces.
-Widely adopted in ECP codes ($\sim$30\% per Evans et al.~\cite{Evans2022}).
+Abstracts both execution and memory via portable \texttt{View}s and
+\texttt{ExecutionSpace}s. \texttt{TeamPolicy} exposes scoped shared memory
+(equivalent to CUDA \texttt{\_\_shared\_\_}), enabling shared-memory tiling
+where the algorithm requires it. Widely adopted in ECP codes
+($\sim$30\% per Evans et al.~\cite{Evans2022}).
 
 \paragraph{RAJA~\cite{Hornung2014}.}
-Loop abstraction: execution policies, index sets, kernel fusion.
-Different philosophy from Kokkos --- loop-level vs.\ data-structure-level.
+Abstracts loop-level execution policies while leaving memory management
+explicit. \texttt{forall} and reduction policies are expressive for
+regular loops and reductions, but RAJA provides no portable API for
+scoped shared-memory allocation. Kernels that require shared-memory tiling
+(e.g., DGEMM) must either fall back to vendor extensions or forgo tiling
+entirely, incurring an algorithmic memory traffic penalty
+(Section~\ref{sec:taxonomy}, pattern P004).
 
 \paragraph{SYCL~\cite{Reyes2020}.}
-Open Khronos standard. Vendor-neutral heterogeneous programming.
-Implementations: Intel DPC++, AdaptiveCpp (hipSYCL).
+An open Khronos standard for heterogeneous programming. \texttt{local\_accessor}
+provides portable shared-memory access, making SYCL expressive for
+tiling-dependent kernels. On AMD hardware, SYCL is implemented via the
+AdaptiveCpp (hipSYCL) backend, which routes kernel launches through the
+HSA runtime. This introduces a per-launch dispatch overhead ($\approx$19\,µs)
+that is higher than native HIP or Kokkos/HIP launch costs and becomes
+significant for fine-grained, level-set style workloads
+(Section~\ref{sec:taxonomy}, pattern P008).
 
 \paragraph{Julia~\cite{Bezanson2017}.}
-High-level language with JIT compilation. CUDA.jl/AMDGPU.jl backends.
-Godoy et al.~\cite{Godoy2023} show Julia achieves $>0.9$ efficiency on AMD
-but struggles on NVIDIA for DGEMM --- a pattern we investigate.
+A high-level language with just-in-time compilation via LLVM. The CUDA.jl
+and AMDGPU.jl packages generate device code from high-level array operations
+and custom GPU kernels written in Julia syntax. Julia arrays use
+column-major storage by default, which can create coalescing advantages
+(or penalties) relative to row-major native baselines depending on
+access patterns. Crucially, this coalescing behavior is
+architecture-specific: the presence and magnitude of the layout effect
+differs between NVIDIA and AMD hardware (Section~\ref{sec:results},
+pattern P005).
 
-\subsection{Hardware Platforms}
+\paragraph{Numba (excluded).}
+Numba's CUDA JIT backend does not support NVIDIA Blackwell (compute
+capability~12.0) due to a PTX~9.2 / driver PTX compatibility mismatch.
+Numba is excluded from all experiments. This exclusion does not affect
+the generalizability of our findings, as Kokkos, RAJA, SYCL, and Julia
+collectively cover the full abstraction spectrum.
 
-TODO: Table of three target platforms (A100, MI250X, PVC) with peak BW and FLOP/s.
-See project\_spec.md \S5.1.
+% ------------------------------------------------------------------
+\subsection{Target Hardware Architectures}
+\label{subsec:hardware}
+% ------------------------------------------------------------------
+
+This paper evaluates abstraction effectiveness across two GPU architectures
+from two vendors. Table~\ref{tab:hardware} summarizes the key characteristics
+of each platform.
+
+\begin{table}[h]
+\centering
+\caption{Target GPU architectures. Peak BW is manufacturer-specified;
+measured BW for the RTX~5060 is 288\,GB/s (conservative, high-clock state)
+due to GDDR7 dynamic clock behavior described below.}
+\label{tab:hardware}
+\begin{tabular}{lllllll}
+\hline
+\textbf{Vendor} & \textbf{GPU} & \textbf{Architecture} & \textbf{Memory}
+& \textbf{Peak BW} & \textbf{Native Model} & \textbf{Role} \\
+\hline
+NVIDIA & RTX 5060   & Blackwell (GB107) & 8\,GB GDDR7   &  384\,GB/s & CUDA & Dev/validation \\
+AMD    & MI300X     & CDNA3             & 192\,GB HBM3  & 5300\,GB/s & HIP  & Primary HPC \\
+\hline
+\end{tabular}
+\end{table}
+
+These two architectures differ in several ways that are directly consequential
+for abstraction evaluation:
+
+\paragraph{Thread execution width.}
+NVIDIA GPUs execute threads in \emph{warps} of 32; AMD CDNA3 GPUs execute in
+\emph{wavefronts} of 64. An abstraction that implicitly assumes a 32-wide
+execution unit will generate suboptimal code on AMD hardware. In our E3
+(3D Stencil) experiments on MI300X, enabling the wave64 execution path
+recovered only 3\% of the performance gap, revealing that Kokkos'
+\texttt{MDRangePolicy} code generation is the dominant bottleneck rather
+than the warp-width mismatch itself (Section~\ref{sec:taxonomy}, pattern P006).
+
+\paragraph{Memory hierarchy and shared-memory access.}
+NVIDIA Blackwell provides a configurable L1/shared memory split (up to
+128\,KB); AMD CDNA3 provides Local Data Share (LDS) with distinct bank
+conflict behavior and different total capacity. Abstractions that do not
+expose portable shared-memory allocation cannot leverage these hardware
+features, forcing global-memory round-trips and degrading performance on
+algorithms that require data reuse within a thread block
+(Section~\ref{sec:taxonomy}, pattern P004).
+
+\paragraph{Compiler backend maturity.}
+NVIDIA's \texttt{nvcc} toolchain has over a decade of optimization history;
+AMD's \texttt{hipcc} and the AdaptiveCpp SYCL backend are newer and exhibit
+different code generation quality for the same abstraction-layer source.
+Abstraction overhead is therefore not a property of a framework in isolation
+--- it is a joint property of the framework and the compiler backend targeting
+a specific architecture. This explains why PPC values for the same abstraction
+can differ substantially between NVIDIA and AMD, as observed across our
+experiments (Section~\ref{sec:results}).
+
+\paragraph{RTX~5060 dynamic clock protocol.}
+The RTX~5060's GDDR7 memory controller operates at a reduced clock frequency
+on first access and transitions irreversibly to a high-performance state
+after approximately 40 sustained high-bandwidth iterations. This behavior
+is unique to consumer-grade GDDR7 and does not occur on the MI300X HBM3
+stack. All RTX~5060 experiments in this paper use a 50-iteration warmup
+protocol (rather than the standard 10-iteration warmup) to guarantee
+that measurements are taken in the high-clock state. The reported peak
+bandwidth used in roofline analysis is 288\,GB/s (the conservative
+measured high-clock value), not the manufacturer-specified 384\,GB/s
+theoretical peak.
+
+% ------------------------------------------------------------------
+\subsection{Selective Abstraction: Concept and Motivation}
+\label{subsec:selective}
+% ------------------------------------------------------------------
+
+The standard framing of the portability problem is binary: either use an
+abstraction framework (gaining portability, potentially losing performance)
+or write native code (retaining performance, sacrificing portability). This
+framing is empirically inadequate. Our results --- and those of prior
+work~\cite{Godoy2023, Evans2022} --- demonstrate that the same abstraction
+can simultaneously be excellent for one workload and catastrophic for an
+adjacent one on the same hardware. Julia/CUDA.jl, for example, delivers
+$1.25\times$ native DGEMM throughput on RTX~5060 via a memory layout
+advantage, yet collapses to $0.35\times$ native efficiency on BFS via
+dispatch amplification. The framework has not changed; the workload
+structure has.
+
+We use the term \emph{selective abstraction} to describe the principle that
+optimal abstraction granularity is neither universally maximal (always use a
+framework) nor universally minimal (always write native code), but is
+context-dependent on three factors:
+
+\begin{enumerate}
+    \item \textbf{Workload structure}: whether the kernel is memory-bound or
+    compute-bound, regular or irregular, and whether it requires
+    shared-memory tiling or level-set scheduling.
+    \item \textbf{Problem size}: the ratio of useful computation time to
+    framework launch and dispatch overhead, which determines whether overhead
+    is amortized or dominant.
+    \item \textbf{Target architecture}: which backend the framework uses,
+    and whether the framework's code generation matches the architecture's
+    execution model.
+\end{enumerate}
+
+A key insight motivating this work is that abstraction failures are not
+random. They are \emph{structural}: the same failure mode recurs across
+experiments, architectures, and abstraction layers whenever the same
+combination of workload structure and overhead profile is present. We call
+these recurring failures \emph{abstraction failure modes} and distinguish
+them from implementation bugs, driver regressions, or measurement noise.
+Conversely, recurring success patterns are equally structural --- RAJA and
+Kokkos consistently approach native efficiency for large, regular,
+memory-bound workloads on both platforms, independent of architecture.
+
+The central claim of this work is that these structural patterns are
+measurable, classifiable, and predictable. The empirical taxonomy
+(Section~\ref{sec:taxonomy}) formalizes eight such patterns (P001--P008);
+the decision framework (Section~\ref{sec:framework}) translates them into
+five quantified rules that replace heuristic judgment in abstraction
+selection.

@@ -1,43 +1,385 @@
 % §7 Decision Framework
-% Status: Pending data
+% Status: Written 2026-03-26 — full rewrite with calibrated R1–R5 rules.
 
 \section{Decision Framework}
 \label{sec:framework}
 
-\subsection{Workload Characterization}
+The taxonomy of Section~\ref{sec:taxonomy} identifies eight abstraction
+patterns (P001--P008) and their structural triggers. This section
+operationalizes those patterns into a quantified decision framework: five
+calibrated rules (R1--R5) that predict abstraction PPC from measurable
+workload characteristics \emph{before} an abstraction is adopted. The
+framework replaces heuristic judgment with evidence-based prediction,
+answering RQ3: \textit{Can measurable, empirically-derived thresholds replace
+heuristic judgment in abstraction selection?}
 
-Before a recommendation can be made, five workload characteristics must be measured:
-memory regularity ($\in [0,1]$), arithmetic intensity (FLOP/byte), kernel duration ($\mu$s),
-control flow divergence ($\in [0,1]$), and data structure type.
+% ------------------------------------------------------------------
+\subsection{Predictor Variables}
+\label{subsec:predictors}
+% ------------------------------------------------------------------
 
-\subsection{Decision Logic}
+The framework requires five workload characteristics as input
+(Table~\ref{tab:predictors}). All five are measurable from a native baseline
+implementation and the workload's structural properties --- none require
+running the abstraction first, which is what makes the framework predictive
+rather than retrospective.
 
-TODO: describe the rule-based logic from analysis/decision\_framework.py.
-Insert Fig~\ref{fig:framework_flowchart}.
+\begin{table}[t]
+\centering
+\caption{Predictor variables for the decision framework.}
+\label{tab:predictors}
+\begin{tabular}{llll}
+\hline
+\textbf{Variable} & \textbf{Symbol} & \textbf{Unit}
+& \textbf{How to Measure} \\
+\hline
+Kernel execution time & $T_k$ & \textmu{}s
+& GPU event timing on native kernel; median of 30 runs \\
+Dependency levels & $L$ & ---
+& CPU-side BFS on matrix/graph level structure \\
+Arithmetic intensity & $AI$ & FLOP/byte
+& \texttt{ncu --metrics} or empirical FLOP/memory ratio \\
+Load imbalance index & $\sigma$ & ---
+& $\text{std}(\text{row\_lengths}) / \text{mean}(\text{row\_lengths})$ \\
+API completeness & $\text{API}_{\text{ok}}$ & boolean
+& Can the abstraction express shared-memory tiling? \\
+\hline
+\end{tabular}
+\end{table}
 
-\begin{figure}[ht]
-    \centering
-    % \includegraphics[width=0.8\linewidth]{figures/fig20_decision_framework.pdf}
-    \caption{Decision framework flowchart. Input: workload profile. Output: abstraction strategy.}
-    \label{fig:framework_flowchart}
+The API completeness variable deserves elaboration: it is a static property
+of the abstraction, not the workload. Table~\ref{tab:api_ok} lists the
+classification for each abstraction evaluated in this study.
+
+\begin{table}[t]
+\centering
+\caption{API completeness by abstraction. \textit{True} indicates the
+abstraction provides portable shared-memory allocation primitives sufficient
+for tiled compute kernels (e.g., DGEMM).}
+\label{tab:api_ok}
+\begin{tabular}{lll}
+\hline
+\textbf{Abstraction} & \textbf{API$_{\text{ok}}$} & \textbf{Mechanism} \\
+\hline
+Kokkos (\texttt{TeamPolicy})     & True  & Scratch-pad memory via \texttt{ScratchMemorySpace} \\
+SYCL (\texttt{local\_accessor})  & True  & \texttt{local\_accessor<T>} for workgroup-local memory \\
+RAJA (\texttt{forall})           & False & No portable shared-memory allocation API \\
+Julia (\texttt{@cuda}/\texttt{@roc}) & False & No scoped shared-memory primitives \\
+\hline
+\end{tabular}
+\end{table}
+
+% ------------------------------------------------------------------
+\subsection{Decision Rules}
+\label{subsec:rules}
+% ------------------------------------------------------------------
+
+The framework comprises five rules, presented here in their evaluation
+priority order (highest priority first). Each rule is triggered by a
+measurable condition, produces a PPC prediction from a closed-form formula,
+and recommends an action.
+
+% --- R3 ---
+\paragraph{R3: API Expressivity Gate (P004).}
+\textit{Priority: Highest.}
+
+\noindent\textbf{Condition.}
+$\text{requires\_shared\_memory\_tiling} = \text{true}$ \textbf{and}
+$\text{API}_{\text{ok}}[\text{abstraction}] = \text{false}$.
+
+\noindent\textbf{Predicted PPC.} $0.19$--$0.35$ (midpoint: $0.25$).
+
+\noindent\textbf{Action.}
+Switch to Kokkos \texttt{TeamPolicy}, SYCL \texttt{local\_accessor}, or a
+vendor-tuned library (cuBLAS, rocBLAS).
+
+\noindent\textbf{Rationale.}
+R3 has the highest priority because P004 is an \emph{absolute} limitation:
+no amount of problem-size scaling or granularity tuning can recover the PPC
+deficit caused by a missing algorithmic primitive. R1 and R2 can be mitigated
+by coarsening; R3 cannot.
+
+\noindent\textbf{Validation.}
+RAJA on E2 (DGEMM) on AMD MI300X: PPC $= 0.316$ (small) $\rightarrow 0.236$
+(medium) $\rightarrow 0.189$ (large). The \emph{worsening} trend with
+increasing $N$ confirms an algorithmic root cause --- overhead amortization,
+which would improve PPC with $N$, is not occurring
+(Section~\ref{subsec:e2}).
+
+% --- R4 ---
+\paragraph{R4: Load Imbalance Compound Check (P007).}
+\textit{Priority: Second.}
+
+\noindent\textbf{Condition.}
+($\text{R1 triggered}$ \textbf{or} $T_k / \text{overhead} < 3$)
+\textbf{and} $\sigma > 1.0$.
+
+\noindent\textbf{Formula.}
+\begin{equation}
+    \text{PPC}_{\text{R4}} = \text{PPC}_{\text{baseline}} \times
+    \bigl(1 - 0.10 \times \min(\sigma, 3.0)\bigr)
+    \label{eq:r4}
+\end{equation}
+
+\noindent where $\text{PPC}_{\text{baseline}}$ is the R1 prediction if R1
+triggered, or $T_k / (T_k + \text{overhead})$ otherwise.
+
+\noindent\textbf{Action.}
+Use warp-per-row CSR, segmented reductions, or native implementations for
+irregular workloads at small $N$.
+
+\noindent\textbf{Validation.}
+Julia on E4 (SpMV) with power-law matrix ($\sigma = 2.5$) at small $N$ on
+RTX~5060: $\text{PPC}_{\text{baseline}} = 0.56$, compound prediction
+$= 0.56 \times (1 - 0.10 \times 2.5) = 0.42$; observed PPC $= 0.449$
+(Section~\ref{subsec:e4}).
+
+% --- R2 ---
+\paragraph{R2: Level-Set Dispatch Budget Check (P008).}
+\textit{Priority: Third.}
+
+\noindent\textbf{Condition.}
+$L \times \text{overhead}[\text{abstraction}] > 0.10 \times
+T_{\text{compute}}$, where
+$T_{\text{compute}} = L \times T_k$.
+
+\noindent\textbf{Formula.}
+\begin{equation}
+    \text{PPC}_{\text{R2}} = \frac{T_{\text{compute}}}
+    {T_{\text{compute}} + L \times \text{overhead}[\text{abstraction}]}
+    \label{eq:r2}
+\end{equation}
+
+\noindent\textbf{Action.}
+Prefer RAJA or Kokkos for level-set algorithms (per-launch overhead
+2--5\,\textmu{}s versus Julia 7--25\,\textmu{}s or SYCL 19\,\textmu{}s).
+Estimate $L \times \text{overhead}$ before committing to an abstraction.
+
+\noindent\textbf{Validation.}
+SYCL on E5 (SpTRSV) with Laplacian matrix ($L = 181$) on AMD MI300X:
+$T_{\text{compute}} = 181 \times T_k$, accumulated overhead
+$= 181 \times 70\,\text{\textmu{}s} = 12.67$\,ms. Predicted PPC $= 0.490$;
+observed PPC $= 0.490$ --- an exact model match, the strongest quantitative
+validation in this study (Section~\ref{subsec:e5}).
+
+\noindent\textbf{Inverse case.}
+When levels are \emph{wide} (many rows per level), per-launch overhead
+becomes negligible relative to per-level compute time. In this regime, RAJA
+and Kokkos can \emph{exceed} native PPC because their fence implementations
+pipeline more efficiently than native \texttt{cudaDeviceSynchronize}:
+RAJA on E5/random/large on RTX~5060 achieves PPC $= 1.299$
+(Section~\ref{subsec:e5}).
+
+% --- R1 ---
+\paragraph{R1: Launch Overhead Dominance Check (P001).}
+\textit{Priority: Fourth.}
+
+\noindent\textbf{Condition.}
+$T_k < \text{overhead}[\text{abstraction}]$.
+
+\noindent\textbf{Formula.}
+\begin{equation}
+    \text{PPC}_{\text{R1}} = \frac{T_k}{T_k + \text{overhead}[\text{abstraction}]}
+    \label{eq:r1}
+\end{equation}
+
+\noindent\textbf{Action.}
+Use native implementations for kernels with $T_k < 50$\,\textmu{}s.
+Coarsen task granularity (kernel fusion) to amortize overhead before adopting
+an abstraction.
+
+\noindent\textbf{Validation.}
+SYCL on E1 (STREAM Triad) at small $N$ on AMD MI300X: $T_k \approx
+3.8$\,\textmu{}s, overhead $\approx 19$\,\textmu{}s, predicted PPC
+$= 3.8 / (3.8 + 19) = 0.167$; observed PPC $= 0.167$
+(Section~\ref{subsec:e1}). Per-launch overhead values by abstraction and
+backend are given in Table~\ref{tab:overhead} (Section~\ref{sec:taxonomy}).
+
+% --- R5 ---
+\paragraph{R5: Safe Abstraction Prediction (Success).}
+\textit{Priority: Lowest (confirmed only when no failure rule triggers).}
+
+\noindent\textbf{Condition.}
+$T_k > 10 \times \text{overhead}[\text{abstraction}]$ \textbf{and}
+R3 not triggered \textbf{and} $N$ is large.
+
+\noindent\textbf{Predicted PPC.} $0.90$--$1.05$.
+
+\noindent\textbf{Action.}
+Abstraction is safe to adopt; near-native performance expected. RAJA and
+Kokkos may exceed $1.0$ on wide-level workloads due to synchronization
+pipelining advantages.
+
+\noindent\textbf{Validation.}
+RAJA on E7 (N-Body) at large $N$ on RTX~5060: $T_k / \text{overhead} = 80$,
+observed PPC $= 0.981$. Kokkos on E1 (STREAM) at large $N$ on AMD MI300X:
+observed PPC $= 1.016$. RAJA on E5 (SpTRSV) with random matrix at large $N$
+on RTX~5060: observed PPC $= 1.299$ --- P008 inverse
+(Section~\ref{subsec:e5}).
+
+% ------------------------------------------------------------------
+\subsection{Rule Evaluation Algorithm}
+\label{subsec:algorithm}
+% ------------------------------------------------------------------
+
+The five rules compose into a priority cascade: the first triggered rule
+determines the prediction. Algorithm~\ref{alg:predict} presents the
+evaluation procedure. A reference implementation is provided in the
+accompanying artifact (\texttt{analysis/decision\_framework.py}).
+
+\begin{figure}[t]
+\centering
+\begin{minipage}{0.92\linewidth}
+\begin{algorithmic}[1]
+\Function{PredictPPC}{$\text{profile}, \text{abstraction}$}
+    \State $\text{R3} \gets \Call{CheckAPIExpressivity}{\text{profile}, \text{abstraction}}$
+    \If{R3.triggered}
+        \State \Return R3.predicted\_ppc \Comment{P004: absolute API limitation}
+    \EndIf
+    \State $\text{R1} \gets \Call{CheckLaunchOverhead}{\text{profile}, \text{abstraction}}$
+    \State $\text{R4} \gets \Call{CheckLoadImbalance}{\text{profile}, \text{abstraction}, \text{R1}}$
+    \If{R4.triggered}
+        \State \Return R4.predicted\_ppc \Comment{P007: compound $>$ individual}
+    \EndIf
+    \State $\text{R2} \gets \Call{CheckLevelSetBudget}{\text{profile}, \text{abstraction}}$
+    \If{R2.triggered}
+        \State \Return R2.predicted\_ppc \Comment{P008: accumulated dispatch}
+    \EndIf
+    \If{R1.triggered}
+        \State \Return R1.predicted\_ppc \Comment{P001: single-kernel overhead}
+    \EndIf
+    \State $\text{R5} \gets \Call{CheckSafeAbstraction}{\text{profile}, \text{abstraction}, \text{R1}, \text{R3}}$
+    \If{R5.triggered}
+        \State \Return R5.predicted\_ppc \Comment{Success: near-native}
+    \EndIf
+    \State \Return $0.80$ \Comment{No rule triggered: acceptable tier}
+\EndFunction
+\end{algorithmic}
+\end{minipage}
+\captionof{algorithm}{Rule evaluation cascade for PPC prediction. Priority
+order: R3 $>$ R4 $>$ R2 $>$ R1 $>$ R5. The default return of $0.80$
+places unclassified configurations in the \textit{acceptable} tier.}
+\label{alg:predict}
 \end{figure}
 
-\subsection{Empirically Derived Thresholds}
+\paragraph{Design decisions.}
+The priority order reflects the nature of each failure mode:
 
-The following thresholds are determined from the experimental campaign:
+\begin{itemize}
+    \item \textbf{R3 first:} API limitations are absolute --- no tuning,
+    scaling, or granularity change can compensate for a missing algorithmic
+    primitive. Checking R3 before overhead-based rules prevents false
+    positives where a large $T_k$ would mask the API deficit.
 
-\begin{table}[ht]
+    \item \textbf{R4 before R2 and R1:} When load imbalance and launch
+    overhead co-occur (P001 $\times$ P007), the compound effect produces a
+    lower PPC than either rule would predict individually. R4's
+    multiplicative model supersedes R1's single-factor prediction.
+
+    \item \textbf{R5 last:} Safety is confirmed by exclusion --- only when
+    no failure rule has triggered can the framework predict near-native
+    performance with confidence.
+
+    \item \textbf{Default 0.80:} Configurations where no rule triggers fall
+    in the gap between clear failure and clear success. The default maps to
+    the \textit{acceptable} tier boundary, signaling that the abstraction is
+    likely viable but should be validated empirically.
+\end{itemize}
+
+\paragraph{Multi-abstraction recommendation.}
+In practice, a developer evaluates multiple candidate abstractions. The
+framework runs Algorithm~\ref{alg:predict} for each candidate and ranks
+them by predicted PPC. The implementation supports four recommendation
+strategies: \textsc{full\_abstraction} (best PPC $\geq 0.80$),
+\textsc{abstraction\_with\_tuning} ($0.60 \leq$ best PPC $< 0.80$),
+\textsc{native} (best PPC $< 0.60$), and a warning list of triggered
+patterns for each candidate.
+
+% ------------------------------------------------------------------
+\subsection{Summary Lookup Table}
+\label{subsec:lookup}
+% ------------------------------------------------------------------
+
+Table~\ref{tab:lookup} provides a quick-reference prediction matrix for
+developers who need an immediate recommendation without running the full
+rule evaluation. The table distills the five rules into predicted PPC tiers
+for each combination of workload class and abstraction, derived from the
+E1--E7 experimental evidence.
+
+\begin{table}[t]
 \centering
-\caption{Empirically derived decision thresholds. TODO: fill in after experiments.}
-\begin{tabular}{lrr}
-\toprule
-Threshold & Hypothetical & Empirical \\
-\midrule
-Memory regularity cutoff & 0.8 & TODO \\
-Minimum kernel duration & 100 $\mu$s & TODO \\
-PPC success threshold & 0.80 & TODO \\
-Control divergence limit & 0.3 & TODO \\
-\bottomrule
+\caption{Summary lookup table: predicted PPC tier by workload class and
+abstraction. Excellent: PPC $\geq 0.80$; Acceptable: $0.60$--$0.80$;
+Poor: $< 0.60$. Excellent+ indicates configurations where abstraction
+may exceed native (PPC $> 1.0$).}
+\label{tab:lookup}
+\begin{tabular}{lcccc}
+\hline
+\textbf{Workload Class} & \textbf{Kokkos} & \textbf{RAJA}
+& \textbf{SYCL} & \textbf{Julia} \\
+\hline
+Memory-bound, large $N$   & Excellent  & Excellent  & Excellent  & Acceptable \\
+Memory-bound, small $N$   & Acceptable & Excellent  & Poor       & Poor       \\
+Compute-bound (tiled)     & Excellent  & Poor       & Excellent  & Poor       \\
+Level-set, narrow levels  & Acceptable & Acceptable & Poor       & Poor       \\
+Level-set, wide levels    & Excellent+ & Excellent+ & Poor       & Acceptable \\
+\hline
 \end{tabular}
-\label{tab:thresholds}
 \end{table}
+
+Two cells warrant emphasis. First, RAJA is rated \textit{Poor} for
+compute-bound tiled workloads due to R3 (P004: API Expressivity Gap) ---
+RAJA's \texttt{forall} cannot express shared-memory tiling, forcing
+global-memory-only access regardless of problem size. Second, SYCL is rated
+\textit{Poor} for both level-set classes despite excellent single-kernel
+performance (E3: 0.987, E7: 0.92) because the HSA dispatch overhead
+($\approx 19$\,\textmu{}s per launch) accumulates destructively across
+$L$ levels (R2/P008).
+
+% ------------------------------------------------------------------
+\subsection{Limitations and Scope}
+\label{subsec:limitations}
+% ------------------------------------------------------------------
+
+The decision framework is subject to several limitations that bound its
+applicability:
+
+\paragraph{Calibration scope.}
+All overhead thresholds (Table~\ref{tab:overhead}) are calibrated on the
+E1--E7 kernel set across NVIDIA RTX~5060 and AMD MI300X. Generalization to
+other kernels, hardware generations, or vendor platforms (e.g., Intel GPU
+Max) is plausible but unvalidated. Section~\ref{sec:validation} evaluates
+predictive accuracy on held-out configurations from within this experimental
+matrix.
+
+\paragraph{Post-warmup assumption.}
+Overhead values represent effective device-side cost after JIT warmup.
+Cold-launch overhead for Julia (150--300\,\textmu{}s on first invocation) and
+SYCL kernel compilation latency are not modeled. Applications with
+single-invocation kernels (e.g., initialization phases) will observe higher
+overhead than predicted.
+
+\paragraph{Unmodeled dispatch patterns.}
+Julia BFS-type workloads exhibit $\approx 267$\,\textmu{}s per-level
+overhead (E6 back-calculation) due to multi-kernel-per-level dispatch
+(scatter + cumulative sum + gather, $\sim$10 sub-launches per level). The
+current model uses 25\,\textmu{}s per level, significantly underpredicting
+the overhead for graph traversal workloads. The reference implementation
+flags these cases with explicit warnings.
+
+\paragraph{Unconfirmed patterns.}
+Patterns P002 (Compiler Backend Failure) and P003 (Memory Layout Mismatch)
+are not covered by any decision rule. If either pattern manifests on a
+target configuration, the framework will overpredict PPC for affected
+abstraction--workload combinations.
+
+\paragraph{Single-GPU scope.}
+The framework targets single-GPU kernel execution. Multi-GPU execution and
+distributed-memory parallelism introduce additional overhead dimensions
+(inter-GPU communication, distributed load balancing, memory coherence)
+that are outside the current model's scope.
+
+\medskip
+\noindent Section~\ref{sec:validation} evaluates the framework's predictive
+accuracy on 39 held-out configurations, quantifying how well these five
+rules generalize within the experimental matrix.

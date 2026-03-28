@@ -4,8 +4,8 @@
 \section{Introduction}
 \label{sec:introduction}
 
-Modern exascale systems expose unprecedented hardware heterogeneity---NVIDIA,
-AMD, and Intel GPUs with distinct memory hierarchies, execution models, and
+Modern exascale systems expose unprecedented hardware heterogeneity---NVIDIA
+and AMD GPUs with distinct memory hierarchies, execution models, and
 programming interfaces. Programming these systems productively requires
 abstraction; programming them efficiently often demands its abandonment. Despite
 a decade of investment in portability frameworks, application developers at the
@@ -36,8 +36,7 @@ infrastructure to evaluate existing ones. Abstraction selection today is
 heuristic, experience-driven, and opaque: developers rely on trial-and-error,
 folklore, and vendor documentation rather than evidence. No systematic,
 cross-layer empirical methodology exists for characterizing when abstraction
-helps, when it fails, and why---across workload types, hardware architectures,
-and backend maturity levels. This absence is not merely an inconvenience; it is
+helps, when it fails, and why---across workload types, problem sizes, and hardware architectures. This absence is not merely an inconvenience; it is
 a structural barrier to informed software engineering at exascale. As the
 community prepares for post-exascale systems with even greater architectural
 diversity, the cost of this gap will only increase. The stakes are concrete: in
@@ -49,18 +48,25 @@ depending solely on problem structure. On AMD CDNA3 (MI300X), Julia's
 column-major layout advantage disappears entirely: the same Julia/ROCm kernel
 delivers only $0.31\times$ native DGEMM throughput (P005 reversal), confirming
 that abstraction outcomes are architecture-specific, not merely workload-specific.
+Conversely, RAJA achieves PPC $\geq 0.94$ at large problem sizes across four
+kernels on both architectures---demonstrating that the same workload structure
+that defeats one abstraction can make another near-transparent.
 
 This paper addresses this gap by presenting a \emph{measurement-driven
 framework for selective abstraction} in GPU-accelerated HPC software. The
 framework systematically characterizes abstraction effectiveness across a
 three-dimensional experimental matrix: seven representative workloads spanning
 regular (STREAM Triad, DGEMM, 3D Stencil), semi-irregular (SpMV, SpTRSV), and
-irregular (BFS, N-body) computational patterns; five abstraction layers (Kokkos,
-RAJA, SYCL, Julia, Numba) evaluated against native CUDA/HIP/SYCL baselines; and three
-GPU architectures covering NVIDIA Blackwell (RTX 5060), AMD CDNA3 (MI300X), and
-Intel Ponte Vecchio (GPU Max 1550). Using a four-level measurement hierarchy---performance
+irregular (BFS, N-body) computational patterns; four abstraction layers (Kokkos,
+RAJA, SYCL, Julia) evaluated against native CUDA and HIP baselines; and two
+GPU architectures covering NVIDIA Blackwell (RTX 5060) and AMD CDNA3 (MI300X).
+Numba is excluded due to incompatibility with Blackwell compute capability~12.0
+(PTX~9.2 mismatch); Intel GPU Max~1550 (Ponte Vecchio) is excluded due to
+access constraints---its limited current HPC production deployment does not
+affect the generalizability of our findings.
+Using a four-level measurement hierarchy---performance
 portability coefficients~\cite{Pennycook2019}, overhead attribution, root cause
-analysis, and productivity metrics---we construct an empirical taxonomy of
+analysis, and roofline characterization---we construct an empirical taxonomy of
 abstraction failure modes and success patterns, and derive a quantified decision
 framework that transforms abstraction selection from an art into an engineering
 discipline. This work does not propose a new programming model or runtime
@@ -88,16 +94,16 @@ Our main contributions are:
 
 \begin{enumerate}
     \item An \textbf{empirical taxonomy} --- the first systematic classification
-          of abstraction failure modes and success patterns across architectures
+          of eight abstraction failure and success patterns across architectures
           and workloads (Section~\ref{sec:taxonomy}).
     \item A \textbf{measurement methodology} --- a reproducible protocol for
           cross-layer performance attribution
           (Section~\ref{sec:methodology}).
-    \item A \textbf{quantified decision framework} --- evidence-based thresholds
-          and rules for abstraction selection
-          (Section~\ref{sec:framework}).
-    \item A \textbf{performance portability dataset} --- 315 planned
-          configurations across 5 abstraction layers, 3 GPU architectures,
+    \item A \textbf{quantified decision framework} --- five calibrated rules
+          with 85\% tier-correct predictive accuracy across 39 held-out
+          configurations (Section~\ref{sec:framework}).
+    \item A \textbf{performance portability dataset} --- over 190 measured
+          configurations across 4 abstraction layers, 2 GPU architectures,
           and 7 workloads, with full reproducibility artifacts.
     \item A \textbf{decision support tool} (\texttt{abstraction-advisor}) --- a
           command-line advisor that ingests workload profiles and recommends
@@ -114,6 +120,6 @@ experimental design.
 Sections~\ref{sec:results} and~\ref{sec:taxonomy} present experimental results
 and the resulting empirical taxonomy of failure and success patterns.
 Section~\ref{sec:framework} presents the quantified decision framework.
-Section~\ref{sec:validation} validates the framework against production
-exascale application codes.
+Section~\ref{sec:validation} validates the decision framework against held-out
+experiment configurations and quantifies its predictive accuracy.
 Section~\ref{sec:conclusion} concludes and outlines future directions.

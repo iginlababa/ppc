@@ -1,4 +1,0 @@
-# Build directory — all contents are generated and should not be committed.
-# CMake build trees, compiled binaries, object files.
-*
-!.gitignore

@@ -1,0 +1,255 @@
+% §3 Related Work
+% Status: Written 2026-03-22 — based on pre-experiment draft, updated with E1–E7 findings.
+
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Exascale Programming in Practice}
+
+Evans et al.~\cite{Evans2022} present an empirical survey of 62 application codes developed
+under the Exascale Computing Project, examining the programming languages and
+programming models adopted in practice for emerging exascale systems. The study
+shows that exascale applications depend heavily on established programming
+languages, with C++ becoming dominant (used in $\sim$85\% of codes) and Fortran
+in rapid decline, and employ hybrid programming models combining MPI for
+internode parallelism with GPU-centric approaches such as CUDA, HIP, OpenMP,
+and portability frameworks like Kokkos and RAJA. Rather than adopting
+fundamentally new programming paradigms, application teams achieve productivity
+through layered abstractions, co-design middleware (e.g., AMReX, CEED, CoPA),
+and selective use of native implementations when portability layers prove
+insufficient. Notably, $\sim$55\% of codes still use native or custom
+implementations. The survey reveals that productivity at exascale is achieved
+not by fully hiding parallelism or hardware details, but by enabling developers
+to choose where abstraction applies and where explicit control must be
+retained---explicit parallelism, platform-specific tuning, and model selection
+remain unavoidable in practice.
+
+Heroux et al.~\cite{heroux2020ecp} present an ecosystem-level overview of the
+software libraries and tools developed within the Exascale Computing Project
+(ECP), documenting how programming models, runtimes, and supporting
+infrastructure were designed and deployed to enable productivity on emerging
+exascale systems. Rather than proposing new programming languages or paradigms,
+the paper shows that exascale productivity is pursued through a layered software
+stack in which portability frameworks (e.g., Kokkos, RAJA), runtimes, and
+co-designed libraries collectively absorb hardware heterogeneity across AMD,
+Intel, and NVIDIA platforms. Programming models are positioned as infrastructure
+components that support libraries and applications, with no convergence toward a
+single abstraction; instead, multiple approaches coexist to accommodate diverse
+application domains, legacy codebases, and vendor-specific constraints. The
+paper emphasizes that effective productivity at exascale depends on ecosystem
+interoperability, vendor co-design, and standardized software delivery
+mechanisms (e.g., Spack, E4S), while acknowledging that expert involvement,
+continuous tuning, and architecture-specific optimizations remain unavoidable.
+
+\textit{Together, these studies establish that exascale programming model design
+is shaped less by the search for a universal abstraction and more by the
+deliberate construction of interoperable software ecosystems that allow selective
+abstraction while preserving expert control---a finding that directly motivates
+the need for a principled, measurement-driven framework for abstraction
+selection.}
+
+% ------------------------------------------------------------------
+\subsection{Task-Based and Dataflow Abstractions}
+% ------------------------------------------------------------------
+
+Bon\'e et al.~\cite{bone2024taskbased} propose a task-based data-flow
+methodology that enables the coordinated use of multiple accelerator programming
+models---CUDA, SYCL, Triton, and OpenMP offload---within a single application.
+The work addresses the growing challenge of API multiplicity and runtime
+interference in heterogeneous systems, where independent runtimes contend for
+CPU resources and introduce synchronization complexity. By expressing
+applications as task DAGs and using task-aware libraries to defer dependency
+release until device operations complete, the approach shifts synchronization
+and thread management into the runtime, mitigating oversubscription and reducing
+manual coordination. However, developers still write native kernels, annotate
+dependencies, and tune task granularity, positioning task-based dataflow as a
+coordination abstraction that reorganizes complexity rather than eliminating it.
+
+Bauer et al.~\cite{bauer2012legion} investigate the limits of high-productivity
+programming systems based on fully implicit parallelism by addressing dynamic
+dependence analysis and distributed coherence in distributed-memory
+environments. The paper demonstrates that apparently sequential semantics can be
+preserved even in the presence of data-dependent control flow and overlapping,
+aliased data partitions by shifting all responsibility for dependence discovery,
+synchronization, and data movement into the runtime system. By reducing
+coherence and dependence analysis to the visibility problem from computer
+graphics and implementing scalable ray-casting algorithms within the Legion
+runtime, the authors show that content-based coherence is technically feasible
+without restricting program expressivity. However, achieving this level of
+abstraction requires sophisticated distributed metadata structures, non-trivial
+runtime overhead, coarse-grained tasks, and substantial engineering effort,
+establishing fully implicit parallelism as an upper bound on abstraction rather
+than a practical strategy for contemporary exascale programming systems.
+
+John et al.~\cite{john2023multgpu} enhance the PaRSEC task-based dataflow
+runtime with dynamic inter-GPU work sharing to address post-mapping load
+imbalance in multi-GPU nodes, a problem acute for irregular applications where
+static heuristics fail. By enabling busy GPUs to push tasks to starving GPUs
+via a work-sharing protocol, the runtime absorbs GPU selection, data movement,
+and synchronization without programmer intervention, demonstrating 3--12\%
+speedup on real sparse matrix workloads and stronger gains (up to $2\times$ at
+8 GPUs) on synthetic benchmarks with high imbalance. However, the approach
+fails to resolve fundamental scalability limits: migration increases memory
+thrashing, introduces lock contention during task selection, and relies on
+task-count-based starvation detection that ignores execution time variability
+and critical path structure. Ultimately, John et al.\ show that dynamic work
+sharing is a necessary but insufficient mechanism for exascale multi-GPU
+programming: it mitigates imbalance but does not eliminate the need for careful
+task decomposition, data partitioning, and runtime parameter tuning.
+
+\textit{Collectively, these works demonstrate that task-based and dataflow
+abstractions can hide coordination complexity and improve productivity, but
+consistently displace rather than eliminate the need for architecture-aware
+tuning---the granularity, decomposition, and scheduling decisions that determine
+whether abstraction delivers its promised performance gains remain the
+programmer's responsibility.}
+
+% ------------------------------------------------------------------
+\subsection{Adaptive and Self-Aware Runtimes}
+% ------------------------------------------------------------------
+
+Chandrasekar et al.~\cite{chandrasekar2023adaptive} investigate adaptive runtime
+techniques for node-aware resource optimization in the Charm++ runtime, focusing
+on dynamically adjusting core utilization, communication parallelism, message
+aggregation strategies, and load balancing based on observed runtime behavior.
+The work demonstrates that reactive, runtime-driven adaptation can yield
+significant performance and energy benefits for certain workloads, including up
+to 40\% speedup for memory-bound stencil codes through core throttling and
+multi-fold improvements for communication-heavy applications via adaptive
+aggregation and diffusion-based load balancing. However, the study also shows
+that adaptivity introduces substantial new complexity in the form of profiling
+overheads, runtime exploration phases, numerous exposed tuning parameters, and
+mandatory programmer instrumentation. Overall, the paper positions runtime
+adaptivity as a mechanism that reorganizes tuning effort rather than eliminating
+it, providing measurable gains for well-understood workloads while remaining
+sensitive to application characteristics and offering limited relief from
+expert-driven performance engineering.
+
+Thomadakis and Chrisochoides~\cite{thomadakis2023prema} present PREMA, a runtime
+system that targets performance portability on heterogeneous distributed
+platforms by shifting scheduling, data movement, and coherence management from
+the programmer to the runtime. The approach introduces task- and data-centric
+abstractions (\texttt{hetero\_task}, \texttt{hetero\_object}) that enable
+applications to execute across CPUs and GPUs without explicit memory transfers
+or synchronization, while dynamically selecting devices and overlapping
+communication with computation. Experimental results demonstrate that PREMA can
+achieve performance comparable to, and in some cases exceeding, hand-tuned
+MPI+CUDA implementations for selected workloads, particularly when aggressive
+over-decomposition and runtime-level optimizations are employed. However, truly
+portable performance is not fully automatic: programmers must still write
+device-specific kernels in a non-standard dialect, manually configure thread
+dimensions, and tune task decomposition strategies. As a result, PREMA
+effectively automates orchestration and coordination concerns, but it does not
+eliminate the need for architecture-aware optimization effort at the application
+level.
+
+\textit{These systems illustrate the ceiling of runtime-driven abstraction: even
+the most sophisticated adaptive and self-aware runtimes achieve portable
+performance only for workloads whose characteristics align with the runtime's
+adaptation model, and require significant programmer effort to configure,
+instrument, and tune when that alignment breaks down.}
+
+% ------------------------------------------------------------------
+\subsection{Performance Portability Layers}
+% ------------------------------------------------------------------
+
+Pennycook et al.~\cite{Pennycook2019} introduce the Performance Portability
+Coefficient (PPC), a formal metric for quantifying how consistently an
+application delivers efficiency across a set of hardware platforms. By
+formulating portability as the harmonic mean of per-platform efficiencies
+relative to best-known implementations, the metric captures the intuition that
+a portability claim is only as strong as its weakest platform. Our study
+operationalizes this metric as the primary evaluation instrument across all
+190+ measured configurations; the three-tier threshold system we adopt
+(PPC $\geq 0.80$ excellent; $0.60$--$0.80$ acceptable; $< 0.60$ poor) is
+consistent with Pennycook et al.'s recommended interpretation guidelines.
+
+Zhao et al.~\cite{zhao2023hiplz} introduce HIPLZ, a compiler and runtime system
+that enables performance portability of HIP applications across GPU vendors by
+implementing the HIP runtime API on top of Intel's Level Zero driver. Rather
+than proposing a new programming model, HIPLZ preserves existing HIP semantics
+and toolchains, translating HIP kernels to SPIR-V and executing them on Intel
+GPUs without source-level changes. Evaluation across 50 HIP applications shows
+high functional portability and performance parity with OpenCL on Intel hardware,
+demonstrating that narrow, translation-based approaches can reduce vendor lock-in
+with minimal adoption friction. However, incomplete API coverage, correctness
+failures, and reliance on driver-specific behaviors reveal that thin translation
+layers shift low-level complexity into the runtime rather than eliminating it,
+limiting robustness and reinforcing the need for native implementations in
+performance-critical exascale codes.
+
+Godoy et al.~\cite{Godoy2023} evaluate the performance portability of Julia,
+Python/Numba, and Kokkos against vendor-native C/OpenMP, CUDA, and HIP
+implementations on exascale-class AMD EPYC/MI250X (CDNA2) and Arm
+Altra/NVIDIA A100 nodes using a dense matrix multiplication kernel. On AMD
+hardware, Julia achieves 0.903--0.976 efficiency relative to vendor baselines,
+with AMDGPU.jl occasionally outperforming HIP; Kokkos achieves 0.677--1.014
+efficiency on CPUs but collapses to 0.208--0.260 on NVIDIA A100 GPUs;
+Python/Numba consistently underperforms (0.095--0.713) and lacks AMD GPU
+support. The study demonstrates that high-level abstractions do not guarantee
+performance portability: Julia succeeds on CDNA2 hardware but incurs a 40\%
+penalty on NVIDIA A100 single precision, while Kokkos and Python/Numba fail
+catastrophically on NVIDIA GPUs despite using vendor backends. Our experiments
+extend this finding to CDNA3 (MI300X): the Julia column-major advantage observed
+by Godoy et al.\ on CDNA2 (MI250X) is absent on CDNA3, where Julia/ROCm
+delivers only $0.31\times$ native DGEMM throughput---a platform-generation
+reversal that underscores the architecture-specificity of abstraction outcomes
+and motivates evaluation across successive hardware generations.
+
+Deakin et al.~\cite{Deakin2019} introduce GPU-STREAM (BabelStream), a
+multi-framework memory bandwidth benchmark that implements the STREAM Triad
+pattern across CUDA, OpenCL, OpenMP, Kokkos, RAJA, SYCL, and other frameworks
+on a common hardware target. By isolating memory bandwidth from algorithmic
+complexity, BabelStream reveals that even a trivially portable workload
+exposes implementation-quality differences across frameworks: framework overhead,
+memory allocation strategies, and compiler code generation all affect achieved
+bandwidth. We use BabelStream as our E1 baseline (STREAM Triad), establishing
+the performance ceiling for memory-bound portability before moving to
+computationally complex workloads.
+
+Ziogas et al.~\cite{ziogas2025dace} present Data-Centric Python, a
+high-performance subset of Python built on the Stateful Dataflow multiGraph
+(SDFG) intermediate representation, which enables automatic optimization and
+specialization of annotated Python code across CPUs, GPUs, and FPGAs. By
+making data movement explicit through a data-centric IR and applying multi-level
+dataflow transformations, the framework achieves 2.47$\times$ and 3.75$\times$
+speedups over prior best solutions on CPU and GPU respectively, and scales to
+512 nodes with up to 93.16\% efficiency on the Piz Daint supercomputer.
+Crucially, the system provides a selective control mechanism: power users can
+override automatic decisions and specify explicit parallelism and partitioning
+schemes when the automatic heuristics are insufficient, while domain scientists
+retain Python's productivity for the common case. However, the framework's
+performance depends on the quality of its auto-optimization heuristics, which
+can fail silently on irregular control flow, non-standard memory access
+patterns, or architectures not covered by the backend specialization
+pipeline---precisely the conditions under which the abstraction boundary must
+be manually managed.
+
+\textit{Across these portability layers, a consistent pattern emerges:
+abstraction delivers portable performance for well-structured, regular workloads
+on mature backends, but degrades unpredictably when workload characteristics,
+compiler heuristics, or hardware targets fall outside the abstraction's design
+envelope---and no existing framework provides a principled method for predicting
+or detecting these failure modes in advance.}
+
+% ------------------------------------------------------------------
+\subsection*{Gap Statement}
+% ------------------------------------------------------------------
+
+Despite extensive work on high-level programming models, task-based runtimes,
+adaptive execution systems, and portability layers for exascale computing, there
+is no systematic, measurement-driven methodology for deciding where abstraction
+should be applied and where explicit control must be retained. Existing studies
+either (i) propose new abstractions or runtimes and evaluate them in isolation,
+or (ii) measure performance portability within a single abstraction layer,
+without analyzing cross-layer failure patterns, their root causes, or their
+dependence on problem size and hardware generation. As a result, abstraction
+choices remain heuristic, experience-driven, and opaque, forcing developers to
+rely on trial-and-error rather than evidence when balancing productivity against
+performance. What is missing is an empirical, cross-layer characterization of
+abstraction effectiveness that explains when abstraction helps, when it fails,
+and why---across workload types, problem sizes, and hardware architectures. The
+methodology proposed in Section~\ref{sec:methodology} is designed to fill
+precisely this gap, providing a measurement-driven decision framework grounded
+in systematic empirical evidence from seven representative kernels across two
+GPU architectures.

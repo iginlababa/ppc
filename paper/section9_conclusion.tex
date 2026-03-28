@@ -1,32 +1,171 @@
 % §9 Conclusion
-% Status: Pending
+% Status: Written 2026-03-26 — full rewrite with RQ answers and empirical evidence.
 
 \section{Conclusion}
 \label{sec:conclusion}
 
-TODO: Write after all results are complete.
+Abstraction selection in GPU-accelerated HPC software has long been guided
+by heuristic judgment, developer experience, and trial-and-error. This paper
+presented a measurement-driven framework for \emph{selective abstraction}
+that replaces this opaque process with evidence-based prediction. Through
+a systematic evaluation of four abstraction layers (Kokkos, RAJA, SYCL,
+Julia) against native CUDA and HIP baselines across seven representative
+workloads and two GPU architectures (NVIDIA RTX~5060 and AMD MI300X), we
+measured over 190 configurations and constructed a quantified decision
+framework grounded in empirical observation.
 
-Key messages to convey:
+% ------------------------------------------------------------------
+\subsection*{Research Question Answers}
+% ------------------------------------------------------------------
+
+\paragraph{RQ1: When does abstraction help?}
+Abstraction delivers near-native performance when kernel execution time
+substantially exceeds per-launch overhead and the abstraction's API can
+express the optimal algorithm. Specifically, when $T_k > 10 \times
+\text{overhead}$ and no API expressivity gap exists (R5), all four
+abstractions achieve PPC $\geq 0.90$ (Section~\ref{sec:framework}). At
+large problem sizes with memory-bound workloads, all abstractions achieve
+PPC $\geq 0.91$ on both platforms (E1, Section~\ref{subsec:e1}). RAJA and
+Kokkos can even \emph{exceed} native performance on wide-level workloads
+through synchronisation pipelining advantages (RAJA: PPC $= 1.299$ on E5
+random/large, Section~\ref{subsec:e5}). Across the full experimental
+matrix, RAJA achieves the best cross-platform portability
+($\varphi = 0.954$), followed by Kokkos ($\varphi = 0.886$).
+
+\paragraph{RQ2: When does abstraction fail?}
+Abstraction fails in structurally predictable ways. We identified eight
+patterns (P001--P008), of which five are validated with quantitative
+evidence (Section~\ref{sec:taxonomy}). Three patterns --- launch overhead
+dominance (P001), API expressivity gap (P004), and level-set dispatch
+amplification (P008) --- account for approximately 80\% of all
+configurations with PPC $< 0.60$. These failures are not random: they
+recur whenever the same combination of workload structure and overhead
+profile is present, independent of framework version. Julia is the most
+architecture-sensitive abstraction: its column-major layout advantage
+produces PPC $= 1.25$ on NVIDIA DGEMM (P005) but reverses to PPC $= 0.31$
+on AMD, where the native baseline is $4\times$ stronger. SYCL's
+performance variance is explained almost entirely by workload structure:
+single-kernel workloads achieve 0.92--0.99 efficiency, while multi-kernel
+level-set workloads collapse to 0.30--0.49 through HSA dispatch
+amplification.
+
+\paragraph{RQ3: How can we quantify the trade-off?}
+Yes. Five calibrated decision rules (R1--R5), derived from five measurable
+workload characteristics ($T_k$, $L$, $\sigma$, $AI$,
+$\text{API}_{\text{ok}}$), predict abstraction PPC with 85\%
+tier-correct accuracy on 39 held-out configurations from E6 (BFS) and
+E7 (N-Body) that were not used during rule calibration
+(Section~\ref{sec:validation}). The strongest validation is R2's exact
+prediction of SYCL/SpTRSV performance on AMD MI300X (predicted PPC
+$= 0.490$, observed $= 0.490$). The framework is implemented as a
+command-line tool (\texttt{abstraction-advisor}) that ingests workload
+profiles and produces ranked abstraction recommendations with pattern
+warnings.
+
+% ------------------------------------------------------------------
+\subsection*{Contributions}
+% ------------------------------------------------------------------
+
+This paper makes five contributions:
+
+\begin{enumerate}
+    \item An \textbf{empirical taxonomy} of eight abstraction failure and
+    success patterns (P001--P008), five validated with structural recurrence
+    across experiments (Section~\ref{sec:taxonomy}).
+
+    \item A \textbf{measurement methodology} comprising a four-level
+    hierarchy (PPC $\rightarrow$ overhead attribution $\rightarrow$ root
+    cause analysis $\rightarrow$ roofline characterisation) applied across
+    190+ configurations (Section~\ref{sec:methodology}).
+
+    \item A \textbf{quantified decision framework} of five calibrated rules
+    with 85\% tier-correct predictive accuracy on held-out workloads
+    (Section~\ref{sec:framework}).
+
+    \item A \textbf{performance portability dataset} spanning 4 abstraction
+    layers, 2 GPU architectures, and 7 workloads, with full reproducibility
+    artifacts.
+
+    \item A \textbf{decision support tool}
+    (\texttt{abstraction-advisor}) that operationalises the framework as a
+    command-line advisor for abstraction selection.
+\end{enumerate}
+
+% ------------------------------------------------------------------
+\subsection*{Limitations}
+% ------------------------------------------------------------------
+
+This work is subject to several limitations that bound the scope of its
+claims:
+
 \begin{itemize}
-    \item First systematic, measurement-driven classification of abstraction failure modes
-    \item Reproducible protocol that enables the community to repeat and extend this work
-    \item Empirically grounded thresholds replace guesswork in abstraction selection
-    \item \texttt{abstraction-advisor} tool makes the framework actionable
+    \item \textbf{Two hardware platforms.} The experimental matrix covers
+    NVIDIA RTX~5060 (Blackwell, consumer-grade) and AMD MI300X (CDNA3, HPC).
+    Intel GPU Max, NVIDIA H100/GH200, and AMD CDNA4 are not evaluated.
+    The RTX~5060's consumer-grade classification limits the
+    representativeness of the NVIDIA results for HPC-class deployments,
+    though the framework's rule structure is expected to transfer with
+    recalibrated overhead thresholds.
+
+    \item \textbf{Seven kernels.} The workload set covers regular,
+    semi-irregular, and irregular patterns but does not include FFT, AMR,
+    particle-in-cell, or deep learning workloads. Patterns not represented
+    in the training set cannot be predicted.
+
+    \item \textbf{Single-GPU scope.} Multi-GPU execution and
+    distributed-memory parallelism introduce overhead dimensions
+    (inter-GPU communication, distributed load balancing) outside the
+    current model.
+
+    \item \textbf{Temporal snapshot.} Per-launch overhead thresholds are
+    tied to specific compiler, framework, and driver versions. The
+    calibration protocol is reproducible, but threshold values will require
+    recalibration as software stacks evolve.
+
+    \item \textbf{Unconfirmed patterns.} P002 (Compiler Backend Failure)
+    and P003 (Memory Layout Mismatch) could not be confirmed due to
+    hardware profiling constraints (\texttt{ncu} blocked on RTX~5060).
 \end{itemize}
 
-\subsection{Limitations}
+% ------------------------------------------------------------------
+\subsection*{Future Work}
+% ------------------------------------------------------------------
+
+Several directions extend this work:
 
 \begin{itemize}
-    \item Single-node GPU only --- no distributed-memory MPI layer
-    \item Snapshot in time --- compiler and framework quality improves each release
-    \item 7 kernels may not cover all HPC workload patterns
+    \item \textbf{Hardware expansion.} Recalibrating overhead thresholds
+    for Intel GPU Max~1550, NVIDIA H100/GH200, and AMD CDNA4 would test
+    whether the rule structure transfers across hardware generations with
+    only threshold updates.
+
+    \item \textbf{Workload expansion.} Adding FFT, AMR, particle-in-cell,
+    and deep learning inference kernels would test whether the eight-pattern
+    taxonomy is complete or whether additional failure modes emerge.
+
+    \item \textbf{Multi-GPU and distributed execution.} Extending the
+    framework to model MPI communication overhead, inter-GPU data transfer,
+    and distributed load balancing would address the single-node limitation.
+
+    \item \textbf{Retrospective ECP validation.} Applying the framework
+    retrospectively to production ECP codes (ExaSMR, QMCPACK, LAMMPS) would
+    test whether it predicts the abstraction choices made by expert
+    developers in practice.
+
+    \item \textbf{Living taxonomy.} Establishing a community-maintained
+    pattern database with standardised contribution protocols would enable
+    continuous threshold recalibration and pattern discovery as new
+    frameworks and architectures emerge.
+
+    \item \textbf{Automated root-cause attribution.} Integrating PTX/GCN
+    inspection and hardware counter analysis into the decision tool would
+    enable automated diagnosis of patterns P002 and P003, which currently
+    require manual profiling.
 \end{itemize}
 
-\subsection{Future Work}
-
-\begin{itemize}
-    \item Extend to multi-GPU and distributed-memory configurations
-    \item Automate PTX/GCN inspection for faster root cause attribution
-    \item Living taxonomy database with community contributions
-    \item Extend to emerging platforms (Grace-Hopper, MI300X)
-\end{itemize}
+\medskip
+\noindent Selective abstraction --- choosing the right level of abstraction
+for each workload, architecture, and performance target --- is not an art
+but an engineering discipline amenable to measurement, classification, and
+prediction. This paper provides the methodology and evidence base to
+practise it.
