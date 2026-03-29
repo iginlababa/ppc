@@ -1,2 +1,1 @@
 kernel,abstraction,platform,problem_size,throughput_median,throughput_iqr,throughput_min,throughput_max,n_runs,native_throughput,efficiency,profiling_reason
-dgemm,raja_naive,nvidia_rtx5060_laptop,large,85.10743199999999,0.2583327500000081,84.861235,85.492496,30,176.224018,0.4829502412094587,efficiency=0.483 < 0.85

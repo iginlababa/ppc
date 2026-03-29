@@ -32,8 +32,8 @@ REQUIRED_COLUMNS = [
 
 VALID_KERNELS      = {"stream", "dgemm", "stencil", "spmv", "sptrsv", "bfs", "nbody"}
 VALID_ABSTRACTIONS = {"native", "kokkos", "raja", "sycl", "julia", "numba"}
-VALID_PLATFORMS    = {"nvidia_a100", "nvidia_rtx5060", "amd_mi250x", "intel_pvc"}
-VALID_SIZES        = {"small", "medium", "large"}
+VALID_PLATFORMS    = {"nvidia_a100", "nvidia_rtx5060", "nvidia_h100_sxm", "amd_mi250x", "amd_mi300x", "intel_pvc"}
+VALID_SIZES        = {"small", "medium", "large", "xlarge"}
 
 
 def validate(df: pd.DataFrame, strict: bool = False) -> list[str]:
