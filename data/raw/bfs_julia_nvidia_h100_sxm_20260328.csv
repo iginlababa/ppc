@@ -1,0 +1,1 @@
+timestamp,experiment_id,kernel,abstraction,platform,graph_type,problem_size,n_vertices,n_edges,n_levels,max_frontier_width,min_frontier_width,peak_frontier_fraction,run_id,execution_time_ms,throughput_gflops,hw_state_verified

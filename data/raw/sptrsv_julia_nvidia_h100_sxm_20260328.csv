@@ -1,0 +1,1 @@
+timestamp,experiment_id,kernel,abstraction,platform,matrix_type,problem_size,n_rows,nnz,n_levels,max_level_width,min_level_width,run_id,execution_time_ms,throughput_gflops,hw_state_verified
