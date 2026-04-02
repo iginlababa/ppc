@@ -32,11 +32,13 @@ abstractions:
 
 platforms:
   - nvidia_a100
+  - nvidia_h100_sxm
   - amd_mi250x
   - intel_pvc
 
 peak_flops_gflops:
   nvidia_a100: 19500   # 19.5 TFLOP/s FP64
+  nvidia_h100_sxm: 67000  # 67 TFLOP/s FP64; HBM3, CC 9.0
   amd_mi250x: 47900    # 47.9 TFLOP/s FP64
   intel_pvc: 22200     # 22.2 TFLOP/s FP64
 

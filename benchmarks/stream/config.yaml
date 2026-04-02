@@ -37,12 +37,14 @@ abstractions:
 platforms:
   - nvidia_rtx5060
   - nvidia_a100
+  - nvidia_h100_sxm
   - amd_mi250x
   - intel_pvc
 
 peak_bandwidth_gbs:
   nvidia_rtx5060: 288   # 128-bit GDDR7 @ ~18 Gbps; measured burst ~235 GB/s
   nvidia_a100: 2039
+  nvidia_h100_sxm: 3350  # HBM3 80 GB, 3350 GB/s theoretical peak; CC 9.0
   amd_mi250x: 3277
   intel_pvc: 3276
 

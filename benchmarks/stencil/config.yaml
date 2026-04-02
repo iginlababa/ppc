@@ -45,6 +45,13 @@ abstractions:
     - sycl        # nd_range<3> USM, work-group {2,4,32}
     - julia       # CUDA.jl @cuda backend
     - numba       # UNSUPPORTED: CC 12.0 Blackwell, PTX 9.2 > driver max PTX 9.1
+  nvidia_h100_sxm:
+    - native      # stencil-cuda: __global__ kernel, 3D grid; CC 9.0 sm_90
+    - kokkos      # MDRangePolicy<Rank<3>> tiling {2,4,32}; Kokkos_ARCH_HOPPER90
+    - raja        # RAJA::kernel 3D CUDA policy
+    - sycl        # nd_range<3> USM; SYCL support pending verification on CC 9.0
+    - julia       # CUDA.jl @cuda backend
+    - numba       # numba.cuda; CC 9.0 supported in numba >= 0.57
   amd_mi300x:
     - native      # stencil-hip: HIP __global__ kernel, 3D grid
     - kokkos      # MDRangePolicy<Rank<3>> HIP backend
@@ -54,6 +61,7 @@ abstractions:
 
 platforms:
   - nvidia_rtx5060_laptop
+  - nvidia_h100_sxm
   - amd_mi300x
 
 correctness:

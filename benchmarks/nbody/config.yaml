@@ -36,10 +36,13 @@ abstractions:
 
 platforms:
   - nvidia_rtx5060
+  - nvidia_h100_sxm
   - amd_mi300x
 
 platform_abstractions:
   nvidia_rtx5060: [native_notile, native_tile, kokkos, raja, julia]
+  nvidia_h100_sxm: [native, kokkos, raja, sycl, julia]
+  # CC 9.0; sycl: predicted EXCELLENT (1 launch/rep, no dispatch amplification)
   amd_mi300x:     [hip, kokkos, raja, sycl, julia]
 
 platform_notes:

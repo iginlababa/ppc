@@ -68,6 +68,7 @@ _LAUNCH_OVERHEAD_US: dict[str, float] = {
 # ── Platform → abstraction backend suffix ─────────────────────────────────────
 _PLATFORM_SUFFIX: dict[str, str] = {
     "nvidia_rtx5060": "cuda",
+    "nvidia_h100_sxm": "cuda",
     "amd_mi300x":     "hip",
 }
 

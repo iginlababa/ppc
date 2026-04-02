@@ -30,11 +30,14 @@ abstractions:
 
 platforms:
   - nvidia_rtx5060
+  - nvidia_h100_sxm
   - amd_mi300x
 
 platform_abstractions:
   nvidia_rtx5060: [native, kokkos, raja, julia]
   # numba: UNSUPPORTED_CC120; sycl: NO_COMPILER on RTX 5060
+  nvidia_h100_sxm: [native, kokkos, raja, sycl, julia, numba]
+  # CC 9.0: numba supported; sycl pending verification on Hopper
   amd_mi300x: [native, kokkos, raja, sycl, julia]
   # numba-hip experimental — not included
 

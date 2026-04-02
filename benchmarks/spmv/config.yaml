@@ -37,6 +37,10 @@ platforms:
       native_binary: spmv-cuda
       abstractions: [native, kokkos, raja, julia]   # sycl pending, numba failed
       peak_bw_gbs: 270
+  - nvidia_h100_sxm:
+      native_binary: spmv-cuda
+      abstractions: [native, kokkos, raja, sycl, julia]   # CC 9.0; sycl pending verification
+      peak_bw_gbs: 3350
   - amd_mi300x:
       native_binary: spmv-hip
       abstractions: [native, kokkos, raja, sycl, julia]

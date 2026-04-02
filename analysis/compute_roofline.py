@@ -27,19 +27,21 @@ import yaml
 PEAK_BW_GBS = {
     "nvidia_rtx5060":        288.0,
     "nvidia_rtx5060_locked": 384.0,   # GDDR7 12001 MHz × 128-bit × 2
-    "nvidia_a100":                  2039.0,
-    "amd_mi250x":                   3277.0,
-    "amd_mi300x":                   5300.0,   # HBM3 theoretical peak
-    "intel_pvc":                    3276.0,
+    "nvidia_a100":           2039.0,
+    "nvidia_h100_sxm":       3350.0,  # HBM3 80 GB, CC 9.0 Hopper
+    "amd_mi250x":            3277.0,
+    "amd_mi300x":            5300.0,  # HBM3 theoretical peak
+    "intel_pvc":             3276.0,
 }
 
 PEAK_FLOPS_GFLOPS = {
     "nvidia_rtx5060":        1700.0,   # FP64 ~1.7 TFLOP/s (RTX 5060)
     "nvidia_rtx5060_locked": 1700.0,
-    "nvidia_a100":                  19500.0,
-    "amd_mi250x":                   47900.0,
-    "amd_mi300x":                   163400.0, # FP64 ~163.4 TFLOP/s (MI300X)
-    "intel_pvc":                    22200.0,
+    "nvidia_a100":           19500.0,
+    "nvidia_h100_sxm":       67000.0,  # FP64 ~67 TFLOP/s (H100 SXM)
+    "amd_mi250x":            47900.0,
+    "amd_mi300x":            163400.0, # FP64 ~163.4 TFLOP/s (MI300X)
+    "intel_pvc":             22200.0,
 }
 
 # Bandwidth-bound kernels — primary metric is GB/s

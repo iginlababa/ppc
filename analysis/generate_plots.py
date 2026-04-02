@@ -53,9 +53,11 @@ ABSTRACTION_COLORS = {
 
 PLATFORM_MARKERS = {
     "nvidia_rtx5060": "D",
-    "nvidia_a100":           "o",
-    "amd_mi250x":            "s",
-    "intel_pvc":             "^",
+    "nvidia_a100":    "o",
+    "nvidia_h100_sxm": "P",   # plus-filled marker; H100 SXM HBM3
+    "amd_mi250x":     "s",
+    "amd_mi300x":     "X",
+    "intel_pvc":      "^",
 }
 
 KERNELS = ["stream", "dgemm", "stencil", "spmv", "sptrsv", "bfs", "nbody"]

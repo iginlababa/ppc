@@ -34,10 +34,13 @@ abstractions:
 
 platforms:
   - nvidia_rtx5060
+  - nvidia_h100_sxm
   - amd_mi300x
 
 platform_abstractions:
   nvidia_rtx5060: [native, kokkos, raja, julia]
+  nvidia_h100_sxm: [native, kokkos, raja, julia]
+  # sycl: pending verification on CC 9.0; numba: n_levels × launch overhead expected significant
   amd_mi300x:     [native, kokkos, raja, sycl, julia]
 
 availability_notes:

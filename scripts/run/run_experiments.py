@@ -70,7 +70,8 @@ def run_kernel(experiment_id: str, kernel: str, script: str,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", required=True,
-                        choices=["nvidia_rtx5060", "nvidia_a100", "amd_mi250x", "intel_pvc"])
+                        choices=["nvidia_rtx5060", "nvidia_a100", "nvidia_h100_sxm",
+                                 "amd_mi250x", "amd_mi300x", "intel_pvc"])
     parser.add_argument("--reps", type=int, default=30)
     parser.add_argument("--experiments", default=",".join(KERNEL_SCRIPTS.keys()),
                         help="Comma-separated experiment IDs (default: all)")
