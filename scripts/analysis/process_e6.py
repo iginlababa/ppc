@@ -43,6 +43,10 @@ PLATFORM_CONFIGS = {
         "abstractions": ["native", "kokkos", "raja", "sycl", "julia"],
         # numba-hip experimental — not included
     },
+    "nvidia_h100_sxm": {
+        "abstractions": ["native", "kokkos", "raja", "julia"],
+        # sycl: no compiler in current environment; numba: no kernel source
+    },
 }
 
 ALL_ABSTRACTIONS = ["native", "kokkos", "raja", "sycl", "julia"]

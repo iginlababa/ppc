@@ -47,6 +47,12 @@ PLATFORM_CONFIGS = {
         "peak_bw_gbs":  4010.0,             # GB/s — E1 STREAM measured
         "peak_fp64_gflops": 163400.0,       # GFLOP/s (163.4 TFLOP/s datasheet)
     },
+    "nvidia_h100_sxm": {
+        "abstractions": ["native", "kokkos", "raja", "julia", "numba"],
+        "unsupported":  {"sycl"},
+        "peak_bw_gbs":  3087.0,             # GB/s — E1 STREAM measured (native, large)
+        "peak_fp64_gflops": 67000.0,        # GFLOP/s (67 TFLOP/s datasheet)
+    },
 }
 
 MATRIX_TYPES = ["laplacian_2d", "random_sparse", "power_law"]

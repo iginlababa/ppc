@@ -50,6 +50,10 @@ PLATFORM_CONFIGS = {
         "abstractions": ["native", "kokkos", "raja", "sycl", "julia"],
         # no numba (numba-hip experimental)
     },
+    "nvidia_h100_sxm": {
+        "abstractions": ["native", "kokkos", "raja", "julia"],
+        # sycl: no compiler in current environment; numba: no kernel source
+    },
 }
 
 # For backward-compat: derive a flat list used in ordering

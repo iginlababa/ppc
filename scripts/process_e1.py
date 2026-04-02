@@ -50,6 +50,12 @@ PLATFORM_CONFIGS = {
         "abstractions":        ["native", "kokkos", "raja", "julia", "sycl"],
         "select_native_batch0": False,
     },
+    "nvidia_h100_sxm": {
+        "peak_bw_gbs":         3350.0,  # HBM3 80 GB, CC 9.0
+        "warmup_drop":         0,
+        "abstractions":        ["native", "kokkos", "raja", "julia", "numba"],
+        "select_native_batch0": False,
+    },
 }
 
 # ── Load raw CSVs ─────────────────────────────────────────────────────────────

@@ -67,6 +67,15 @@ PLATFORM_CONFIGS = {
         "unsupported": set(),
         "warmup_drop": 0,
     },
+    "nvidia_h100_sxm": {
+        "abstractions": [
+            "native", "native_cublas",
+            "kokkos", "raja_naive",
+            "julia_naive", "julia_cublas", "numba",
+        ],
+        "unsupported": {"sycl"},   # no SYCL compiler in current environment
+        "warmup_drop": 0,
+    },
 }
 
 

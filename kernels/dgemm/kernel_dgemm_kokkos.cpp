@@ -43,15 +43,17 @@ void run_dgemm_kokkos(int N, double alpha, double beta,
     const int num_block_row = (N + TILE - 1) / TILE;
     const int num_block_col = (N + TILE - 1) / TILE;
     const int num_teams     = num_block_row * num_block_col;
-    const int team_size     = TILE * TILE;   // 1024 — matches CUDA block
     const int num_tiles_k   = (N + TILE - 1) / TILE;
 
     // Scratch level 0 = shared memory; 2 TILE×TILE double arrays = 16 KB
     const size_t shmem = static_cast<size_t>(2 * TILE * TILE) * sizeof(double);
 
+    // Use Kokkos::AUTO so the runtime picks the maximum valid team_size for
+    // the GPU (needed for sm_90 Hopper where register pressure may reduce the
+    // max below TILE*TILE=1024).
     Kokkos::parallel_for(
         "dgemm_kokkos",
-        TeamPol(num_teams, team_size)
+        TeamPol(num_teams, Kokkos::AUTO)
             .set_scratch_size(0, Kokkos::PerTeam(shmem)),
         KOKKOS_LAMBDA(const MemberT& team) {
             const int blk  = team.league_rank();

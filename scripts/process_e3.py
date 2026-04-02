@@ -46,6 +46,10 @@ PLATFORM_CONFIGS = {
         "abstractions": ["native", "kokkos", "raja", "sycl", "julia"],
         "unsupported": set(),
     },
+    "nvidia_h100_sxm": {
+        "abstractions": ["native", "kokkos", "raja", "julia", "numba"],
+        "unsupported": {"sycl"},
+    },
 }
 
 # No ceiling references for E3 (unlike E2 where cuBLAS/rocBLAS were ceilings).
